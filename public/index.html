@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title data-i18n="app.title">洛谷刷题本</title>
+<link rel="stylesheet" href="/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="logo" data-i18n="app.logo">洛</span>
+    <select id="profileSelect" class="profile-select" title="切换刷题本" data-i18n-title="profile.switch"></select>
+    <input id="docTitle" class="doc-title" value="我的刷题本" title="点击可改名" data-i18n-title="doc.renameTip">
+  </div>
+
+  <div class="add-box">
+    <input id="pidInput" type="text" placeholder="输入题号或题名，如 P1001 / 树状数组 / 采药" autocomplete="off" spellcheck="false" data-i18n-ph="problem.inputPlaceholder">
+    <button id="addBtn" class="primary" data-i18n="problem.add">添加题目</button>
+    <div id="suggest" class="suggest hidden"></div>
+  </div>
+
+  <div class="tools">
+    <input id="searchInput" type="search" placeholder="搜索 题号/题名/标签/代码" autocomplete="off" data-i18n-ph="problem.searchPlaceholder">
+    <select id="langSelect" title="界面语言" data-i18n-title="ui.lang"></select>
+    <select id="themeSelect" title="界面配色" data-i18n-title="ui.theme">
+      <option value="dark" data-i18n="ui.theme.dark">深色</option>
+      <option value="light" data-i18n="ui.theme.light">浅色</option>
+      <option value="amber" data-i18n="ui.theme.amber">琥珀</option>
+    </select>
+    <button id="syncBtn" title="同步洛谷账号已做题目" data-i18n-title="sync.tip" data-i18n="sync.button">同步洛谷</button>
+    <button id="statsBtn" title="学习统计" data-i18n-title="stats.title" data-i18n="stats.button">统计</button>
+    <button id="mdBtn" title="查看 Markdown 源码" data-i18n-title="md.tip" data-i18n="md.button">Markdown</button>
+    <button id="exportBtn" title="导出与备份" data-i18n-title="export.tip" data-i18n="export.button">导出 ▾</button>
+    <button id="pdfBtn" class="primary" title="直接生成 PDF 文件" data-i18n-title="pdf.tip" data-i18n="pdf.title">导出 PDF</button>
+    <button id="settingsBtn" title="设置" data-i18n-title="settings.title">⚙</button>
+  </div>
+</header>
+
+<div id="exportMenu" class="menu hidden">
+  <button data-act="md" data-i18n="export.downloadMd">下载 Markdown 文件</button>
+  <button data-act="json" data-i18n="export.downloadJson">下载 JSON 备份</button>
+  <button data-act="import-md" data-i18n="export.importMd">导入 Markdown</button>
+  <button data-act="import-json" data-i18n="export.importJson">导入 JSON</button>
+  <hr>
+  <button data-act="share" data-i18n="export.share">导出当前题目为分享卡片</button>
+  <button data-act="import-card" data-i18n="export.importCard">导入分享卡片</button>
+  <hr>
+  <button data-act="copy-md" data-i18n="export.copyMd">复制 Markdown 到剪贴板</button>
+  <button data-act="backup" data-i18n="export.backup">立即备份存档</button>
+</div>
+
+<main class="layout" id="layout">
+
+  <!-- 左：文件夹树 -->
+  <section class="pane outline-pane" id="paneOutline">
+    <div class="pane-head">
+      <span class="pane-title" data-i18n="outline.title">索引</span>
+      <div class="pane-actions">
+        <button id="addFolder" title="在顶层新建文件夹" data-i18n-title="outline.addFolderHint" data-i18n="outline.addFolder">+ 文件夹</button>
+        <button id="addSubFolder" title="在当前文件夹里新建子文件夹" data-i18n-title="outline.addSubfolderHint" data-i18n="outline.addSubfolder">+ 子文件夹</button>
+      </div>
+    </div>
+    <div class="filters" id="filters">
+      <div class="filter-row" id="statusFilters"></div>
+      <div class="filter-row" id="diffFilters"></div>
+      <div class="filter-row tags" id="tagFilters"></div>
+      <button id="clearFilters" class="link hidden" data-i18n="outline.clearFilters">清除筛选</button>
+    </div>
+    <div class="outline-scroll" id="outlineScroll">
+      <ul id="outline" class="outline"></ul>
+      <div id="rootDrop" class="root-drop hidden" data-i18n="outline.rootDrop">拖到此处 → 移到顶层</div>
+      <div id="emptyHint" class="empty-hint">
+        <p data-i18n="outline.empty">还没有题目</p>
+        <!-- 本句中间嵌着 <code> 示例，整体替换会删掉子元素，因此按文本片段拆开标注：
+             拼接顺序为 part1 → P1001 → part2 → exampleTitle → part3（P1001 是题号，不需翻译） -->
+        <p class="dim"><span data-i18n="outline.emptyHint.part1">在上面输入题号（</span><code>P1001</code><span data-i18n="outline.emptyHint.part2">）或题名（</span><code data-i18n="outline.emptyHint.exampleTitle">采药</code><span data-i18n="outline.emptyHint.part3">）回车即可自动抓取</span></p>
+        <p class="dim" data-i18n="outline.emptyHint.sync">也可以点「同步洛谷」把账号里已通过的题目批量导进来</p>
+      </div>
+      <div id="marquee" class="marquee hidden"></div>
+    </div>
+    <div id="batchBar" class="batch-bar hidden">
+      <span id="batchCount" data-i18n="outline.batchCount">已选 0 项</span>
+      <button id="batchDelete" class="danger" data-i18n="common.delete">删除</button>
+      <button id="batchMove" data-i18n="outline.moveTo">移动到…</button>
+      <button id="batchAc" data-i18n="outline.markAc">标为已通过</button>
+      <button id="batchTodo" data-i18n="outline.markTodo">标为未做</button>
+      <button id="batchClear" class="ghost" data-i18n="common.cancel">取消</button>
+    </div>
+  </section>
+
+  <div class="splitter" data-split="outline"></div>
+
+  <!-- 中：题目 -->
+  <section class="pane problem-pane" id="paneProblem">
+    <div class="pane-head">
+      <span class="pane-title" data-i18n="problem.title">题目</span>
+      <div class="pane-actions">
+        <button id="refreshProblem" title="重新从洛谷抓取题面" data-i18n-title="problem.refreshHint" data-i18n="problem.refresh">重新抓取</button>
+        <button id="shareProblem" title="导出这道题为分享卡片" data-i18n-title="problem.shareHint" data-i18n="problem.share">分享</button>
+        <button id="deleteProblem" class="danger" title="从刷题本中删除" data-i18n-title="problem.deleteHint" data-i18n="common.delete">删除</button>
+      </div>
+    </div>
+    <div class="problem-scroll" id="problemBody">
+      <div class="empty-hint"><p class="dim" data-i18n="problem.emptyHint">从左侧选择一道题，或添加新题目</p></div>
+    </div>
+  </section>
+
+  <div class="splitter" data-split="problem"></div>
+
+  <!-- 右：代码 -->
+  <section class="pane code-pane" id="paneCode">
+    <div class="pane-head">
+      <span class="pane-title" data-i18n="code.title">我的代码 · C++17</span>
+      <div class="pane-actions">
+        <button id="formatBtn" title="用 clang-format 格式化" data-i18n-title="code.formatHint" data-i18n="code.format">格式化</button>
+        <select id="statusSelect" title="做题状态" data-i18n-title="problem.status">
+          <option value="todo" data-i18n="problem.status.todo">未做</option>
+          <option value="ac" data-i18n="problem.status.ac">已通过</option>
+          <option value="review" data-i18n="problem.status.review">待复习</option>
+          <option value="stuck" data-i18n="problem.status.stuck">卡住</option>
+        </select>
+        <span id="saveState" class="save-state" data-i18n="code.saved">已保存</span>
+      </div>
+    </div>
+
+    <div class="editor-shell">
+      <div class="gutter" id="gutter"><div id="gutterInner"></div></div>
+      <div class="code-scroll" id="codeScroll">
+        <pre class="hl" id="hl"><code id="hlCode"></code></pre>
+        <textarea id="code" spellcheck="false" autocomplete="off" autocapitalize="off" wrap="off" placeholder="在这里粘贴或编写 C++ 代码…" data-i18n-ph="code.placeholder"></textarea>
+      </div>
+    </div>
+
+    <div class="run-bar">
+      <button id="runBtn" class="primary" title="Ctrl+Enter" data-i18n-title="run.shortcut" data-i18n="run.start">▶ 运行</button>
+      <button id="judgeBtn" title="对样例评测" data-i18n-title="run.judgeHint" data-i18n="run.judge">评测样例</button>
+      <button id="stopBtn" class="danger" title="强制结束正在运行的程序" data-i18n-title="run.stopHint" data-i18n="run.stop">■ 停止</button>
+      <span class="spacer"></span>
+      <label class="inline"><span data-i18n="run.timeLimit">时限</span> <input id="timeLimit" type="number" min="100" step="100" value="1000" title="毫秒" data-i18n-title="run.ms"> ms</label>
+      <button id="fillSample" class="ghost" title="把第一个样例填进输入/期望输出" data-i18n-title="run.fillSampleHint" data-i18n="run.fillSample">填入样例</button>
+    </div>
+
+    <div class="tabs" id="tabs">
+      <button class="tab on" data-tab="io" data-i18n="tab.io">运行输入</button>
+      <button class="tab" data-tab="tests"><span data-i18n="tab.tests">测试点</span> <span id="tabTestCount" class="tab-badge">0</span></button>
+    </div>
+
+    <div class="tab-body">
+      <div class="tab-pane" data-pane="io">
+        <div class="io-grid">
+          <div class="io-cell">
+            <label data-i18n="io.stdin">输入 (stdin)</label>
+            <textarea id="stdin" spellcheck="false" wrap="off" placeholder="程序的标准输入…" data-i18n-ph="io.stdinPlaceholder"></textarea>
+          </div>
+          <div class="io-cell">
+            <label data-i18n="io.expected">期望输出（留空则只运行不比对）</label>
+            <textarea id="expected" spellcheck="false" wrap="off" placeholder="用于比对的标准输出…" data-i18n-ph="io.expectedPlaceholder"></textarea>
+          </div>
+        </div>
+      </div>
+
+      <div class="tab-pane hidden" data-pane="tests">
+        <div class="tests-toolbar">
+          <button id="addTest" class="primary" data-i18n="tests.add">+ 用上面的输入/输出新建测试点</button>
+          <button id="runAllTests" data-i18n="tests.runAll">全部测试</button>
+          <span id="testsSummary" class="dim"></span>
+        </div>
+        <div id="testsList" class="tests-list"></div>
+      </div>
+    </div>
+
+    <div class="result" id="result">
+      <div class="result-head">
+        <span data-i18n="result.title">运行结果</span>
+        <span id="resultMeta" class="dim"></span>
+      </div>
+      <div id="resultBody" class="result-body dim" data-i18n="result.idle">尚未运行</div>
+    </div>
+  </section>
+</main>
+
+<!-- ============ 首启动向导 ============ -->
+<div id="wizardPanel" class="modal hidden">
+  <div class="modal-box">
+    <div class="modal-head"><h3 data-i18n="wizard.title">欢迎使用洛谷刷题本</h3><button class="close" data-close>✕</button></div>
+    <div class="modal-body" id="wizardBody"></div>
+  </div>
+</div>
+
+<!-- ============ 同步洛谷 ============ -->
+<div id="syncPanel" class="modal hidden">
+  <div class="modal-box wide">
+    <div class="modal-head"><h3 data-i18n="sync.title">同步洛谷已做题目</h3><button class="close" data-close>✕</button></div>
+    <div class="modal-body">
+      <div class="sync-top">
+        <label data-i18n="sync.uid">洛谷用户编号 (UID)</label>
+        <input id="syncUid" type="text" placeholder="例如 2213920" autocomplete="off" data-i18n-ph="sync.uidPlaceholder">
+        <button id="syncFetch" class="primary" data-i18n="sync.fetch">拉取数据</button>
+        <span class="dim" style="font-size:11.5px" data-i18n="sync.note">公开接口，不需要密码</span>
+      </div>
+      <div id="syncResult" class="sync-result dim" data-i18n="sync.resultHint">填好 UID 后点「拉取数据」。</div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 导出 PDF ============ -->
+<div id="pdfPanel" class="modal hidden">
+  <div class="modal-box">
+    <div class="modal-head"><h3 data-i18n="pdf.title">导出 PDF</h3><button class="close" data-close>✕</button></div>
+    <div class="modal-body">
+      <div class="opt-row"><span class="opt-label" data-i18n="pdf.scope">范围</span>
+        <label class="radio"><input type="radio" name="pdfScope" value="all" checked> <span data-i18n="pdf.scope.all">全部题目</span></label>
+        <label class="radio"><input type="radio" name="pdfScope" value="current"> <span data-i18n="pdf.scope.current">当前选中（题目或文件夹）</span></label>
+      </div>
+      <div class="opt-row"><span class="opt-label" data-i18n="pdf.theme">配色</span><div id="pdfThemes" class="theme-list"></div></div>
+      <div class="opt-row"><span class="opt-label" data-i18n="pdf.layout">版式</span>
+        <label class="radio"><input type="radio" name="pdfLayout" value="two" checked> <span data-i18n="pdf.layout.two">题目与代码左右分栏</span></label>
+        <label class="radio"><input type="radio" name="pdfLayout" value="one"> <span data-i18n="pdf.layout.one">单栏上下排列</span></label>
+      </div>
+      <div class="opt-row"><span class="opt-label" data-i18n="pdf.content">内容</span>
+        <label class="radio"><input type="checkbox" id="pdfCode" checked> <span data-i18n="pdf.includeCode">包含我的代码</span></label>
+        <label class="radio"><input type="checkbox" id="pdfNote" checked> <span data-i18n="pdf.includeNote">包含我的笔记</span></label>
+      </div>
+      <div class="prompt-actions">
+        <button class="ghost" data-close data-i18n="common.cancel">取消</button>
+        <button id="pdfGo" class="primary" data-i18n="pdf.generate">生成 PDF 文件</button>
+      </div>
+      <div id="pdfStatus" class="pdf-status dim"></div>
+      <div id="pdfHistory"></div>
+    </div>
+  </div>
+</div>
+
+<!-- 统计 -->
+<div id="statsPanel" class="modal hidden">
+  <div class="modal-box">
+    <div class="modal-head"><h3 data-i18n="stats.title">学习统计</h3><button class="close" data-close>✕</button></div>
+    <div class="modal-body" id="statsBody"></div>
+  </div>
+</div>
+
+<!-- Markdown 源码 -->
+<div id="mdPanel" class="modal hidden">
+  <div class="modal-box wide">
+    <div class="modal-head">
+      <h3 data-i18n="md.title">Markdown 源码</h3>
+      <div><button id="copyMd" data-i18n="md.copy">复制</button><button class="close" data-close>✕</button></div>
+    </div>
+    <div class="modal-body"><pre id="mdBody" class="md-pre"></pre></div>
+  </div>
+</div>
+
+<!-- 设置 -->
+<div id="settingsPanel" class="modal hidden">
+  <div class="modal-box wide">
+    <div class="modal-head"><h3 data-i18n="settings.title">设置</h3><button class="close" data-close>✕</button></div>
+    <div class="modal-body" id="settingsBody"></div>
+  </div>
+</div>
+
+<!-- 选文件夹 -->
+<div id="pickPanel" class="modal hidden">
+  <div class="modal-box narrow">
+    <div class="modal-head"><h3 id="pickTitle" data-i18n="pick.title">选择文件夹</h3><button class="close" data-close>✕</button></div>
+    <div class="modal-body">
+      <select id="pickSelect" size="10" style="width:100%"></select>
+      <div class="prompt-actions">
+        <button class="ghost" data-close data-i18n="common.cancel">取消</button>
+        <button id="pickOk" class="primary" data-i18n="common.ok">确定</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="toast" class="toast hidden">
+  <span id="toastText"></span>
+  <button id="toastUndo" class="hidden" data-i18n="toast.undo">撤销</button>
+</div>
+
+<!-- 重命名 -->
+<div id="promptPanel" class="modal hidden">
+  <div class="modal-box narrow">
+    <div class="modal-head"><h3 id="promptTitle" data-i18n="prompt.rename">重命名</h3><button class="close" data-close>✕</button></div>
+    <div class="modal-body">
+      <input id="promptInput" type="text">
+      <div class="prompt-actions">
+        <button class="ghost" data-close data-i18n="common.cancel">取消</button>
+        <button id="promptOk" class="primary" data-i18n="common.ok">确定</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<input type="file" id="fileInput" class="hidden" accept=".md,.markdown,.json,.txt">
+
+<script src="/vendor/marked/marked.min.js"></script>
+<script src="/vendor/dompurify/purify.min.js"></script>
+<script src="/vendor/katex/katex.min.js"></script>
+<script src="/vendor/katex/auto-render.min.js"></script>
+<script src="/locales.js"></script>
+<script src="/i18n.js"></script>
+<script src="/app.js"></script>
+</body>
+</html>

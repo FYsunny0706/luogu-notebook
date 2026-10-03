@@ -1,0 +1,20 @@
+{
+  "name": "luogu-notebook",
+  "version": "1.0.0",
+  "description": "洛谷刷题本 —— 本地运行的刷题记录工具：文件夹树索引、洛谷进度同步、C++ 本地评测、一键导出 PDF",
+  "type": "module",
+  "main": "server.mjs",
+  "scripts": {
+    "start": "node server.mjs",
+    "dev": "node server.mjs --open",
+    "test": "node tools/test-roundtrip.mjs && node tools/test-narrative.mjs",
+    "test:ui": "node tools/ui-test.mjs",
+    "test:pdf": "node tools/test-pdf.mjs",
+    "package": "node tools/package.mjs"
+  },
+  "keywords": ["luogu", "oi", "competitive-programming", "notebook", "markdown"],
+  "license": "MIT",
+  "engines": { "node": ">=20" },
+  "dependencies": {},
+  "private": false
+}

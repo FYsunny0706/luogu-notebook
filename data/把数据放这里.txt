@@ -1,0 +1,6 @@
+刷题本第一次启动时会自动在这里生成档案文件：
+  notebooks/<档案名>.json   结构化数据（唯一数据源）
+  notebooks/<档案名>.md     自动导出的 Markdown
+  backups/                  手动备份
+
+这个目录可以直接拷走备份，也不要提交到 Git。
