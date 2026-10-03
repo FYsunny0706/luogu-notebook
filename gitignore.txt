@@ -1,0 +1,20 @@
+# 个人数据，不进版本库
+data/
+exports/
+build/
+config.json
+tools/bin/
+
+# 依赖（本项目零依赖，纯粹为了保险）
+node_modules/
+
+# 打包产物
+dist/
+
+# 编辑器 / 系统
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.log
+*.tmp
