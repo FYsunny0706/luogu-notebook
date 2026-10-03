@@ -18,6 +18,29 @@
 
 > 需要 **Node.js 20+**（[下载](https://nodejs.org/)）。前端依赖已经内置在 `public/vendor/`，**断网也能用**。
 
+ ## 界面预览
+
+![导出 PDF 的首页版式](docs/preview/09-exported-pdf.png)
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/preview/01-overview.jpg" alt="主界面总览"><br><sub>文件夹树索引 + 题面 + 代码编辑器</sub></td>
+    <td width="50%"><img src="docs/preview/02-judge.jpg" alt="本地评测"><br><sub>本地评测：样例逐点比对、AC 判定与耗时</sub></td>
+  </tr>
+  <tr>
+    <td><img src="docs/preview/03-test-cases.jpg" alt="自测数据点"><br><sub>多组自测数据点，逐点显示 AC / WA</sub></td>
+    <td><img src="docs/preview/04-export-pdf.jpg" alt="导出 PDF"><br><sub>导出 PDF：5 套配色、题目与代码左右分栏</sub></td>
+  </tr>
+  <tr>
+    <td><img src="docs/preview/05-sync-luogu.jpg" alt="同步洛谷"><br><sub>填 UID 同步账号已通过题目</sub></td>
+    <td><img src="docs/preview/06-statistics.jpg" alt="学习统计"><br><sub>学习统计：状态 / 难度 / 算法标签</sub></td>
+  </tr>
+  <tr>
+    <td><img src="docs/preview/07-theme-light.jpg" alt="浅色配色"><br><sub>三套界面配色</sub></td>
+    <td><img src="docs/preview/08-ui-english.jpg" alt="英文界面"><br><sub>三语界面：简体中文 / 繁體中文 / English</sub></td>
+  </tr>
+</table>
+
 ## 界面怎么用
 
 ```
