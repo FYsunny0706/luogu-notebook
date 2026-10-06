@@ -17,6 +17,7 @@ import {
 } from "./lib/store.mjs";
 import { formatCode, findClangFormat, downloadClangFormat, STYLE_PRESETS } from "./lib/format.mjs";
 import { buildPrintHtml, buildCardHtml, putPrintPage, getPrintPage, renderPdf, renderPng, detectBrowser, exportDir, THEMES, EXPORT_DIR } from "./lib/pdf.mjs";
+import { createDesktopShortcut } from "./lib/shortcut.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)));
 const PUBLIC_DIR = path.join(root, "public");
@@ -199,6 +200,12 @@ const routes = {
         localNotPassed: local.filter((p) => !passedPids.has(p.pid) && (p.status ?? "todo") !== "ac").length,
       },
     };
+  },
+
+  /* ---------- 桌面快捷方式 ---------- */
+  "POST /api/shortcut": async () => {
+    const r = await createDesktopShortcut({ name: "洛谷刷题本" });
+    return { ok: true, ...r };
   },
 
   /* ---------- 代码版本历史 ---------- */

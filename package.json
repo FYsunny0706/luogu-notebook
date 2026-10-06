@@ -1,6 +1,6 @@
 {
   "name": "luogu-notebook",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "洛谷刷题本 —— 本地运行的刷题记录工具：文件夹树索引（可切换按算法/按比赛分类）、洛谷进度同步、题单导入、C++ 本地评测、代码版本历史、一键导出 PDF（带目录与书签）/ Markdown / PNG 分享卡片",
   "type": "module",
   "main": "server.mjs",
