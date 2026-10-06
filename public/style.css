@@ -263,7 +263,17 @@ input[type=search]::-webkit-search-cancel-button { filter: invert(.5); }
 .md-body blockquote { margin: 10px 0; padding: 4px 12px; border-left: 3px solid var(--line-2); color: var(--fg-dim); }
 .md-body table { border-collapse: collapse; margin: 10px 0; }
 .md-body th, .md-body td { border: 1px solid var(--line-2); padding: 4px 9px; }
-.md-body img { max-width: 100%; }
+/* 题面图片：抓题时会下载到本地 data/images/，这里限制宽度并可点击放大 */
+.md-body img {
+  max-width: 100%; height: auto; border-radius: 6px;
+  border: 1px solid var(--line); background: var(--bg-2);
+  margin: 4px 0; cursor: zoom-in;
+}
+.md-body img.zoomed {
+  position: fixed; inset: 0; margin: auto; max-width: 92vw; max-height: 92vh;
+  width: auto; height: auto; z-index: 999; cursor: zoom-out;
+  box-shadow: 0 8px 40px rgba(0, 0, 0, .65);
+}
 .md-body .katex { font-size: 1.03em; color: var(--fg); }
 .md-body .katex-display { overflow-x: auto; overflow-y: hidden; padding: 3px 0; }
 
@@ -400,6 +410,30 @@ input[type=search]::-webkit-search-cancel-button { filter: invert(.5); }
   border: 0; border-radius: 0; background: var(--code-bg); font-family: var(--mono);
   font-size: 11.5px; height: 62px; resize: vertical; padding: 5px 8px;
 }
+
+/* ---------- 数据安全面板 ---------- */
+.safety-actions { display: flex; gap: 8px; margin: 10px 0 6px; }
+.safety-msg { min-height: 18px; font-size: 12px; }
+.safety-list { display: flex; flex-direction: column; gap: 6px; margin: 6px 0 14px; max-height: 210px; overflow: auto; }
+.safety-item {
+  display: flex; align-items: center; gap: 10px; padding: 6px 10px;
+  border: 1px solid var(--line); border-radius: 6px; background: var(--bg-2); font-size: 12.5px;
+}
+.safety-item .s-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.safety-item .s-meta { color: var(--fg-dim); font-size: 11.5px; white-space: nowrap; }
+.safety-item .s-kind { font-size: 11px; padding: 1px 6px; border-radius: 4px; background: var(--bg-4); color: var(--fg-dim); }
+
+/* ---------- 批量添加 ---------- */
+.batch-input {
+  width: 100%; height: 168px; resize: vertical; margin-top: 8px;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.6; padding: 8px 10px;
+  white-space: pre; overflow: auto;
+}
+.batch-meta { display: flex; align-items: center; gap: 10px; margin: 8px 0; font-size: 12px; flex-wrap: wrap; }
+.batch-meta button { margin-left: auto; }
+.batch-opt { display: flex; align-items: center; gap: 6px; font-size: 12.5px; margin: 6px 0 2px; }
+.progress { height: 6px; border-radius: 3px; background: var(--bg-4); overflow: hidden; margin: 10px 0 6px; }
+.progress-fill { height: 100%; width: 0; background: var(--accent); transition: width .2s; }
 
 /* ---------- 运行结果 ---------- */
 .result { flex: 0 1 auto; min-height: 58px; max-height: 26%; display: flex; flex-direction: column; background: var(--bg-2); border-top: 1px solid var(--line); }

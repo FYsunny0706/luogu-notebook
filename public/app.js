@@ -17,6 +17,7 @@ const S = {
   saveTimer: null,
   running: false,
   backfilling: new Set(),
+  batch: { stop: false },
   tab: "io",
 };
 
@@ -203,11 +204,17 @@ const KATEX_DELIMS = [
 ];
 if (window.marked) marked.setOptions({ gfm: true, breaks: true });
 
+/** 题面图片在数据里存的是 images/<题号>/<文件>，渲染时要映射到本地图片路由 */
+function localizeImages(html) {
+  return String(html ?? "").replace(/(src|href)="images\//g, '$1="/api/image/');
+}
+
 function mdToHtml(md) {
   if (!md) return "";
   let html;
   try { html = marked.parse(String(md)); } catch { html = `<p>${esc(md)}</p>`; }
-  return window.DOMPurify ? DOMPurify.sanitize(html, { ADD_ATTR: ["target", "align"] }) : html;
+  const safe = window.DOMPurify ? DOMPurify.sanitize(html, { ADD_ATTR: ["target", "align"] }) : html;
+  return localizeImages(safe);
 }
 function renderMath(root) {
   if (!window.renderMathInElement || !root) return;
@@ -382,7 +389,7 @@ function selectNode(id, { keepSelection = false } = {}) {
   setResult(null);
 }
 function renderBatchBar() {
-  const bar = $("batchBar");
+  const bar = $("batchProgressFill");
   const n = S.selected.size;
   bar.classList.toggle("hidden", n === 0);
   $("batchCount").textContent = t("batch.selected", { n });
@@ -1175,11 +1182,90 @@ async function saveNow() {
   }
   S.doc.title = $("docTitle").value.trim() || t("doc.defaultTitle");
   try {
-    await api("/api/save", { doc: S.doc });
+    const r = await api("/api/save", { doc: S.doc });
+    if (r?.conflict) {
+      // 另一个实例改过数据，本次没有覆盖；我们的版本已被服务端另存为备份
+      updateSaveState(false);
+      toast(t("safety.conflictSave"), true, 9000);
+      return;
+    }
     updateSaveState(false);
   } catch (e) {
     updateSaveState(true);
     toast(t("toast.saveFailed", { message: e.message }), true);
+  }
+}
+
+/* ============================ 数据安全面板 ============================ */
+const BACKUP_KIND = {
+  full: "safety.kind.full", auto: "safety.kind.auto", shrink: "safety.kind.shrink",
+  conflict: "safety.kind.conflict", "pre-migrate": "safety.kind.migrate", legacy: "safety.kind.legacy",
+};
+
+function safetyMsg(text) {
+  const el = $("safetyMsg");
+  if (el) el.textContent = text ?? "";
+}
+
+function fmtBytes(n) {
+  if (!n) return "";
+  return n > 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1)} MB` : `${Math.round(n / 1024)} KB`;
+}
+
+async function renderBackupList() {
+  const box = $("backupList");
+  box.innerHTML = `<div class="dim">…</div>`;
+  try {
+    const { list } = await api("/api/backup/list", {});    if (!list.length) { box.innerHTML = `<div class="dim">${t("safety.noBackup")}</div>`; return; }
+    box.innerHTML = list.map((b) => `
+      <div class="safety-item">
+        <span class="s-kind">${t(BACKUP_KIND[b.kind] ?? "safety.kind.auto")}</span>
+        <span class="s-name" title="${esc(b.name)}">${esc(String(b.at).replace("T", " ").slice(0, 19))}</span>
+        <span class="s-meta">${t("safety.problemCount", { n: b.problems })}${b.images ? " · " + t("safety.imageCount", { n: b.images }) : ""} · ${fmtBytes(b.bytes)}</span>
+        <button class="ghost" data-restore="${esc(b.name)}">${t("safety.restore")}</button>
+      </div>`).join("");
+  } catch (e) {
+    box.innerHTML = `<div class="dim">${esc(e.message)}</div>`;
+  }
+}
+
+async function renderAdoptList() {
+  const box = $("adoptList");
+  box.innerHTML = `<div class="dim">${t("safety.scanning")}</div>`;
+  try {
+    const { list } = await api("/api/adopt/scan", {});
+    if (!list.length) { box.innerHTML = `<div class="dim">${t("safety.noOldDir")}</div>`; return; }
+    box.innerHTML = list.map((o) => `
+      <div class="safety-item">
+        <span class="s-name" title="${esc(o.dir)}">${esc(o.dir)}</span>
+        <span class="s-meta">${t("safety.problemCount", { n: o.problems })} · ${esc(String(o.at).slice(0, 10))}</span>
+        <button class="primary" data-adopt="${esc(o.dir)}">${t("safety.import")}</button>
+      </div>`).join("");
+  } catch (e) {
+    box.innerHTML = `<div class="dim">${esc(e.message)}</div>`;
+  }
+}
+
+function openSafety() {
+  safetyMsg("");
+  $("safetyPanel").classList.remove("hidden");
+  renderBackupList();
+  $("adoptList").innerHTML = `<div class="dim">${t("safety.scanHint")}</div>`;
+}
+
+/** 启动时把服务端的数据安全提示讲清楚（损坏恢复 / 多实例） */
+function reportSafety(st) {
+  const s = st?.safety;
+  if (!s) return;
+  if (s.notice?.kind === "recovered") {
+    toast(t("safety.recovered", { n: s.notice.problems }), true, 12000);
+  } else if (s.notice?.kind === "lost") {
+    toast(t("safety.lost", { file: s.notice.brokenFile ?? "-" }), true, 15000);
+  } else if (s.notice?.kind === "migrated") {
+    toast(t("safety.migrated", { from: s.notice.from, to: s.notice.to }), false, 6000);
+  }
+  if (s.anotherInstance) {
+    toast(t("safety.anotherInstance", { pid: s.anotherInstance.pid, port: s.anotherInstance.port }), true, 12000);
   }
 }
 
@@ -1367,8 +1453,10 @@ function openPdf() {
 async function loadPdfHistory() {
   try {
     const { files, dir } = await api("/api/export/list");
+    // 只显示相对目录名（exports/），完整路径放 title 里 —— 截图给别人看时不暴露本机路径
+    const shortDir = String(dir ?? "").split(/[\\/]/).filter(Boolean).pop() ?? "exports";
     if (!files.length) {
-      $("pdfHistory").innerHTML = `<div class="dim" style="font-size:11.5px;margin-top:10px">${t("pdf.noHistory")}<code>${esc(dir)}</code></div>`;
+      $("pdfHistory").innerHTML = `<div class="dim" style="font-size:11.5px;margin-top:10px">${t("pdf.noHistory")}<code title="${esc(dir)}">${esc(shortDir)}/</code></div>`;
       return;
     }
     $("pdfHistory").innerHTML = `<div class="pdf-history-title">${t("pdf.historyTitle")}</div>` +
@@ -1517,7 +1605,7 @@ function showSettings() {
     <div class="set-grid">
       <div class="set-row">
         <label>${t("settings.gppLabel")}</label>
-        <input id="setGpp" value="${esc(e.gpp ?? "")}" placeholder="D:\\royqh\\mingw64\\bin\\g++.exe">
+        <input id="setGpp" value="${esc(e.gpp ?? "")}" placeholder="C:\\mingw64\\bin\\g++.exe">
       </div>
       <div class="set-row">
         <label>${t("settings.browserLabel")}</label>
@@ -1716,6 +1804,13 @@ function showWizard() {
 
 /* ============================ 事件绑定 ============================ */
 function bindEvents() {
+  // 题面图片点击放大 / 还原
+  document.addEventListener("click", (e) => {
+    const img = e.target?.closest?.(".md-body img");
+    if (!img) return;
+    img.classList.toggle("zoomed");
+  });
+
   // 添加题目
   $("addBtn").onclick = () => {
     const v = $("pidInput").value.trim();
@@ -1847,6 +1942,62 @@ function bindEvents() {
   };
   $("runAllTests").onclick = runAllTests;
 
+  // 数据安全面板
+  $("safetyBackup").onclick = async () => {
+    safetyMsg(t("safety.backingUp"));
+    try {
+      const r = await api("/api/backup", {});
+      safetyMsg(t("safety.backupDone", { name: String(r.file).split(/[\\/]/).pop() }));
+      renderBackupList();
+    } catch (e) { safetyMsg(e.message); }
+  };
+  $("safetyScan").onclick = renderAdoptList;
+  $("safetyPanel").addEventListener("click", async (e) => {
+    const restore = e.target.closest("[data-restore]");
+    if (restore) {
+      const name = restore.dataset.restore;
+      if (!confirm(t("safety.confirmRestore", { name }))) return;
+      safetyMsg(t("safety.restoring"));
+      try {
+        const r = await api("/api/backup/restore", { name });
+        S.doc = r.doc;
+        S.profiles = r.profiles;
+        S.currentId = null;
+        renderProfiles();
+        renderOutline();
+        renderProblem();
+        safetyMsg(t("safety.restored", { n: flattenProblems().length }));
+        renderBackupList();
+      } catch (err) { safetyMsg(err.message); }
+      return;
+    }
+    const adopt = e.target.closest("[data-adopt]");
+    if (adopt) {
+      const dir = adopt.dataset.adopt;
+      if (!confirm(t("safety.confirmAdopt", { dir }))) return;
+      safetyMsg(t("safety.adopting"));
+      try {
+        const r = await api("/api/adopt/import", { dir });
+        S.doc = r.doc;
+        S.profiles = r.profiles;
+        S.currentId = null;
+        renderProfiles();
+        renderOutline();
+        renderProblem();
+        safetyMsg(t("safety.adopted", { n: flattenProblems().length, dir }));
+      } catch (err) { safetyMsg(err.message); }
+    }
+  });
+
+  // 批量添加
+  $("batchAddBtn").onclick = openBatchAdd;
+  $("batchInput").addEventListener("input", updateBatchStats);
+  $("batchInput").addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); startBatchAdd(); }
+  });
+  $("batchGo").onclick = startBatchAdd;
+  $("batchStop").onclick = () => { S.batch.stop = true; };
+
   // 界面配色
   $("themeSelect").onchange = async (e) => {
     applyTheme(e.target.value);
@@ -1893,6 +2044,11 @@ function bindEvents() {
     } else if (act === "backup") {
       const r = await api("/api/backup", {});
       toast(t("toast.backedUp", { file: r.file }), false, 4000);
+    } else if (act === "backup-manage") {
+      openSafety();
+    } else if (act === "adopt") {
+      openSafety();
+      renderAdoptList();
     } else if (act === "share") {
       shareCurrent();
     } else if (act === "import-card") {
@@ -2032,6 +2188,127 @@ async function fetchSuggest(q) {
 }
 function hideSuggest() { $("suggest").classList.add("hidden"); }
 
+/* ============================ 批量添加 ============================ */
+/** 从粘贴的文本里解析题号：支持逗号/空格/换行分隔，也支持整条洛谷链接 */
+function parsePidList(text) {
+  const tokens = String(text ?? "").split(/[\s,，、;；|]+/).map((s) => s.trim()).filter(Boolean);
+  const out = [];
+  const seen = new Set();
+  for (const raw of tokens) {
+    let t = raw
+      .replace(/^https?:\/\/(?:www\.)?luogu\.(?:com\.cn|com)\/problem\//i, "")
+      .replace(/[?#].*$/, "")
+      .replace(/[/\\]+$/, "")
+      .trim();
+    if (!/^[A-Za-z][A-Za-z0-9_]{0,15}$/.test(t)) continue;   // 形状不对的（比如说明文字）直接跳过
+    if (!/\d/.test(t)) continue;                              // 题号一定含数字
+    const pid = t.toUpperCase();
+    if (seen.has(pid)) continue;
+    seen.add(pid);
+    out.push(pid);
+  }
+  return out;
+}
+
+function updateBatchStats() {
+  const parsed = parsePidList($("batchInput").value);
+  const existing = new Set(flattenProblems().map((p) => p.pid));
+  const dup = parsed.filter((p) => existing.has(p));
+  const fresh = parsed.filter((p) => !existing.has(p));
+  $("batchParsed").textContent = parsed.length ? t("batch.parsed", { n: parsed.length, ok: fresh.length }) : "";
+  $("batchDup").textContent = dup.length ? t("batch.dupHint", { n: dup.length }) : "";
+  $("batchGo").disabled = fresh.length === 0;
+  return { fresh, dup };
+}
+
+function openBatchAdd() {
+  $("batchInput").value = "";
+  $("batchProgress").classList.add("hidden");
+  $("batchProgressFill").style.width = "0%";
+  $("batchStatus").textContent = "";
+  updateBatchStats();
+  $("batchPanel").classList.remove("hidden");
+  $("batchInput").focus();
+}
+
+function setBatchProgress(done, total, ok, fail, pid) {
+  $("batchProgressFill").style.width = total ? `${Math.round((done / total) * 100)}%` : "0%";
+  $("batchStatus").textContent = t("batch.progress", { i: Math.min(done + 1, total), total, pid: pid ?? "", ok, fail });
+}
+
+async function startBatchAdd() {
+  const { fresh, dup } = updateBatchStats();
+  if (!fresh.length) return toast(t("batch.nothing"), true);
+  const fetchNow = $("batchFetch").checked;
+
+  pushUndo(t("undo.batchAdd", { n: fresh.length }));
+  const items = fresh.map((pid) => ({
+    id: uid("p"), kind: "problem", pid, title: pid, status: "todo",
+    code: "", note: "", tests: [], addedAt: Date.now(), stub: true,
+  }));
+
+  // 先全部以「待补全」落进树里，用户立刻能看到
+  const e = findEntry(S.currentId);
+  if (e?.node.kind === "folder") {
+    e.node.children = e.node.children ?? [];
+    e.node.children.unshift(...items);
+    e.node.collapsed = false;
+  } else if (e?.parent) {
+    const list = e.parent.children;
+    list.splice(list.findIndex((n) => n.id === e.node.id) + 1, 0, ...items);
+  } else {
+    S.doc.tree.push(...items);
+  }
+  clearAllFilters();
+  markDirty();
+  renderOutline();
+  selectNode(items[0].id);
+
+  if (dup.length) toast(t("batch.dupHint", { n: dup.length }), false, 4000);
+  if (!fetchNow) {
+    $("batchPanel").classList.add("hidden");
+    toast(t("batch.noFetch", { n: items.length }), false, 5000);
+    return;
+  }
+
+  // 逐个抓题面（顺序 + 轻微限速，别把洛谷打疼）
+  S.batch.stop = false;
+  $("batchGo").disabled = true;
+  $("batchProgress").classList.remove("hidden");
+  let ok = 0, fail = 0;
+  const failed = [];
+  for (let i = 0; i < items.length; i++) {
+    if (S.batch.stop) break;
+    const it = items[i];
+    setBatchProgress(i, items.length, ok, fail, it.pid);
+    try {
+      const { problem } = await api("/api/problem/fetch", { pid: it.pid });
+      Object.assign(it, problem, {
+        id: it.id, status: it.status, code: it.code, note: it.note, tests: it.tests, stub: false,
+      });
+      ok++;
+    } catch (err) {
+      fail++;
+      it.fetchError = err.message;
+      failed.push(it.pid);
+    }
+    markDirty();
+    renderOutline();
+    if (S.currentId === it.id) renderProblem();
+    if (i < items.length - 1) await sleep(220);
+  }
+
+  setBatchProgress(items.length, items.length, ok, fail, "");
+  $("batchProgressFill").style.width = "100%";
+  $("batchGo").disabled = false;
+  $("batchStatus").textContent = S.batch.stop
+    ? t("batch.stopped", { ok, fail })
+    : t("batch.done", { ok, fail });
+  if (failed.length) toast(t("batch.fetchFailedList", { list: failed.join(", ") }), true, 8000);
+  toast(S.batch.stop ? t("batch.stopped", { ok, fail }) : t("batch.done", { ok, fail }), false, 5000);
+}
+
+/* ============================ 添加单题 ============================ */
 async function addProblemByPid(pidRaw) {
   const pid = String(pidRaw ?? "").trim();
   if (!pid) return;
@@ -2086,6 +2363,7 @@ async function boot() {
     S.env = { ...state.env, paths: state.paths };
     S.themes = state.themes ?? [];
     S.styles = state.styles ?? [];
+    reportSafety(state);
     // 语言：服务端配置是权威。若和首屏用的（localStorage）不一致，说明在别处改过，
     // 重新加载一次让所有渲染都走新语言；setLang 已把新值写进 localStorage，不会来回重载。
     const cfgLang = S.env.uiLang || "zh-CN";

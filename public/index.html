@@ -19,6 +19,7 @@
   <div class="add-box">
     <input id="pidInput" type="text" placeholder="输入题号或题名，如 P1001 / 树状数组 / 采药" autocomplete="off" spellcheck="false" data-i18n-ph="problem.inputPlaceholder">
     <button id="addBtn" class="primary" data-i18n="problem.add">添加题目</button>
+    <button id="batchAddBtn" class="ghost" title="一次添加多个题号" data-i18n-title="batch.tip" data-i18n="batch.button">批量</button>
     <div id="suggest" class="suggest hidden"></div>
   </div>
 
@@ -50,6 +51,8 @@
   <hr>
   <button data-act="copy-md" data-i18n="export.copyMd">复制 Markdown 到剪贴板</button>
   <button data-act="backup" data-i18n="export.backup">立即备份存档</button>
+  <button data-act="backup-manage" data-i18n="export.backupManage">备份与恢复…</button>
+  <button data-act="adopt" data-i18n="export.adopt">从旧目录导入数据…</button>
 </div>
 
 <main class="layout" id="layout">
@@ -190,6 +193,55 @@
   </div>
 </div>
 
+<!-- ============ 批量添加 ============ -->
+<div id="batchPanel" class="modal hidden">
+  <div class="modal-box">
+    <div class="modal-head"><h3 data-i18n="batch.title">批量添加题目</h3><button class="close" data-close>✕</button></div>
+    <div class="modal-body">
+      <p class="dim" data-i18n="batch.hint">每行一个，或用逗号 / 空格分隔；也可以直接粘贴题单里的题号，链接会自动识别。</p>
+      <textarea id="batchInput" class="batch-input" spellcheck="false" placeholder="P1115 P1147 P1204&#10;P1387, P1496, P1569&#10;https://www.luogu.com.cn/problem/P2004" data-i18n-ph="batch.placeholder"></textarea>
+      <div class="batch-meta">
+        <span id="batchParsed" class="dim"></span>
+        <span id="batchDup" class="dim"></span>
+      </div>
+      <label class="inline batch-opt">
+        <input type="checkbox" id="batchFetch" checked>
+        <span data-i18n="batch.fetchNow">立即抓取题面（较慢，但一次到位）</span>
+      </label>
+      <div class="prompt-actions">
+        <button class="ghost" data-close data-i18n="common.cancel">取消</button>
+        <button id="batchGo" class="primary" data-i18n="batch.start">开始添加</button>
+      </div>
+      <div id="batchProgress" class="hidden">
+        <div class="progress"><div class="progress-fill" id="batchProgressFill"></div></div>
+        <div class="batch-meta">
+          <span id="batchStatus" class="dim"></span>
+          <button id="batchStop" class="danger" data-i18n="batch.stop">停止</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 备份与恢复 ============ -->
+<div id="safetyPanel" class="modal hidden">
+  <div class="modal-box">
+    <div class="modal-head"><h3 data-i18n="safety.title">数据安全</h3><button class="close" data-close>✕</button></div>
+    <div class="modal-body">
+      <p class="dim" data-i18n="safety.intro">每次保存都会自动留一份上一版（.bak）和定期快照；这里可以立刻备份、从备份恢复，或把旧版本目录里的数据导入进来。</p>
+      <div class="safety-actions">
+        <button id="safetyBackup" class="primary" data-i18n="safety.backupNow">立即完整备份</button>
+        <button id="safetyScan" class="ghost" data-i18n="safety.scan">扫描旧目录</button>
+      </div>
+      <div id="safetyMsg" class="dim safety-msg"></div>
+      <h4 data-i18n="safety.backups">备份列表</h4>
+      <div id="backupList" class="safety-list"></div>
+      <h4 data-i18n="safety.oldDirs">找到的旧数据目录</h4>
+      <div id="adoptList" class="safety-list"></div>
+    </div>
+  </div>
+</div>
+
 <!-- ============ 同步洛谷 ============ -->
 <div id="syncPanel" class="modal hidden">
   <div class="modal-box wide">
@@ -197,7 +249,7 @@
     <div class="modal-body">
       <div class="sync-top">
         <label data-i18n="sync.uid">洛谷用户编号 (UID)</label>
-        <input id="syncUid" type="text" placeholder="例如 2213920" autocomplete="off" data-i18n-ph="sync.uidPlaceholder">
+        <input id="syncUid" type="text" placeholder="例如 123456" autocomplete="off" data-i18n-ph="sync.uidPlaceholder">
         <button id="syncFetch" class="primary" data-i18n="sync.fetch">拉取数据</button>
         <span class="dim" style="font-size:11.5px" data-i18n="sync.note">公开接口，不需要密码</span>
       </div>
