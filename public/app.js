@@ -2014,6 +2014,13 @@ function showSettings() {
         <div id="profileList" class="profile-list"></div>
         <button id="newProfile" class="ghost" style="margin-top:6px">${t("settings.newProfile")}</button>
       </div>
+      <div class="set-row">
+        <label>${t("settings.shortcutLabel")}</label>
+        <div class="row-inline">
+          <button id="makeShortcut" class="ghost">${t("settings.shortcutButton")}</button>
+          <span class="dim" style="font-size:12px">${t("settings.shortcutHint")}</span>
+        </div>
+      </div>
     </div>
     <div class="set-note">
       ${t("settings.envLine", { node: esc(e.node ?? ""), platform: esc(e.platform ?? ""), version: esc(e.version ?? "") })}<br>
@@ -2031,6 +2038,14 @@ function showSettings() {
       <button id="saveSettings" class="primary">${t("settings.save")}</button>
     </div>`;
   $("settingsPanel").classList.remove("hidden");
+  $("makeShortcut").onclick = async () => {
+    try {
+      const r = await api("/api/shortcut", {});
+      toast(t("settings.shortcutDone", { file: r.file }), false, 6000);
+    } catch (err) {
+      toast(t("settings.shortcutFailed", { message: err.message }), true, 6000);
+    }
+  };
   $("saveSettings").onclick = async () => {
     try {
       const r = await api("/api/config", {

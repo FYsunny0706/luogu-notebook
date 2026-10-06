@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>洛谷刷题本 · 程序还没启动</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; display: grid; place-items: center;
+    background: #0d1117; color: #e6edf3; padding: 24px;
+    font-family: "Microsoft YaHei", "PingFang SC", system-ui, -apple-system, sans-serif;
+    line-height: 1.75;
+  }
+  .box { max-width: 560px; width: 100%; }
+  .head { display: flex; align-items: center; gap: 12px; margin-bottom: 22px; }
+  .head img { width: 44px; height: 44px; border-radius: 11px; }
+  h1 { font-size: 22px; margin: 0; }
+  .sub { color: #93a1b0; font-size: 14px; }
+  ol { padding-left: 22px; }
+  li { margin: 10px 0; }
+  code, .path {
+    background: #161b22; border: 1px solid #30363d; border-radius: 6px;
+    padding: 1px 7px; font-family: Consolas, "Courier New", monospace; font-size: 13px;
+  }
+  .card { background: #161b22; border: 1px solid #30363d; border-radius: 12px; padding: 22px 24px; }
+  .tip { color: #93a1b0; font-size: 13px; margin-top: 20px; border-top: 1px solid #30363d; padding-top: 14px; }
+  button {
+    margin-top: 18px; background: #238636; color: #fff; border: 0; border-radius: 8px;
+    padding: 9px 18px; font-size: 14px; cursor: pointer; font-family: inherit;
+  }
+  button:hover { background: #2ea043; }
+</style>
+</head>
+<body>
+  <div class="box">
+    <div class="head">
+      <img src="/icons/icon-192.png" alt="">
+      <div>
+        <h1>程序还没启动</h1>
+        <div class="sub">洛谷刷题本是一个跑在你自己电脑上的小服务，需要先启动它</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <ol>
+        <li>回到刷题本所在的文件夹，双击 <span class="path">start.bat</span>（Mac / Linux 是 <span class="path">./start.sh</span>）</li>
+        <li>等黑色小窗口里出现网址，浏览器会自己打开</li>
+        <li>那个黑窗口不要关，关掉就等于把程序停了</li>
+      </ol>
+      <button onclick="location.reload()">我已经启动了，重试</button>
+    </div>
+
+    <div class="tip">
+      想双击桌面图标就能用？在程序里打开 <b>⚙ 设置 → 在桌面创建快捷方式</b>，
+      它会建一个指向 <span class="path">start.bat</span> 的图标，双击就会先把程序跑起来。<br>
+      这个桌面图标（PWA 装的）只是个网址入口，所以程序没开的时候会打不开。
+    </div>
+  </div>
+</body>
+</html>
