@@ -50,7 +50,8 @@ if (budget) {
 } else check("脚本里有 PAGE_PX", false);
 
 console.log("\n=== 4. 结构与分页 ===");
-const problems = (html.match(/<section class="problem">/g) ?? []).length;
+// 注意：加了目录功能后 .problem 会带 id 锚点（<section class="problem" id="p-1">），所以不能要求紧跟 >
+const problems = (html.match(/<section class="problem"/g) ?? []).length;
 const inners = (html.match(/<div class="pinner">/g) ?? []).length;
 check("每道题都有 .pinner 包一层", problems > 0 && problems === inners, `${problems} 题 / ${inners} 个 pinner`);
 check("题目块设了 break-inside:avoid", /break-inside\s*:\s*avoid/.test(pb));

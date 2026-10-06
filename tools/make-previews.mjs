@@ -106,6 +106,11 @@ await ev("document.querySelector('#pdfPanel .close')?.click()");
 await wait(400);
 
 /* ---------- 05 同步洛谷（虚拟账号） ---------- */
+// 注意：「拉取数据」这个动作会把 UID 存进本地 config.json，所以先记下原值，拍完还原
+const prevUid = await ev(`(async () => {
+  const r = await fetch('/api/state');
+  return (await r.json()).env?.luoguUid ?? '';
+})()`);
 await ev(`(() => {
   const mock = ${JSON.stringify(JSON.stringify(MOCK))};
   const orig = window.fetch;
@@ -122,6 +127,13 @@ await wait(1800);
 await shot("05-sync-luogu.png", { label: "同步洛谷（示例账号）" });
 await ev("document.querySelector('#syncPanel .close')?.click()");
 await wait(400);
+// 还原成用户自己的 UID（虚拟 UID 只用于截图）
+await ev(`(async () => {
+  await fetch('/api/config', { method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ luoguUid: ${JSON.stringify(prevUid ?? "")} }) });
+  return true;
+})()`);
+console.log(`  同步面板截图用的是示例账号；已把 UID 还原为 ${prevUid || "（空）"}`);
 
 /* ---------- 06 学习统计 ---------- */
 await ev("document.getElementById('statsBtn')?.click()");
