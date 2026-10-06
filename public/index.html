@@ -3,7 +3,12 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0d1117">
 <title data-i18n="app.title">洛谷刷题本</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png">
+<link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512.png">
+<link rel="apple-touch-icon" href="/icons/icon-192.png">
 <link rel="stylesheet" href="/vendor/katex/katex.min.css">
 <link rel="stylesheet" href="/style.css">
 </head>
@@ -66,6 +71,12 @@
         <button id="addSubFolder" title="在当前文件夹里新建子文件夹" data-i18n-title="outline.addSubfolderHint" data-i18n="outline.addSubfolder">+ 子文件夹</button>
       </div>
     </div>
+    <div class="view-tabs" id="outlineViews">
+      <button class="tab-btn active" data-view="tree" data-i18n="outline.view.tree">我的文件夹</button>
+      <button class="tab-btn" data-view="tag" data-i18n="outline.view.tag">按算法</button>
+      <button class="tab-btn" data-view="contest" data-i18n="outline.view.contest">按比赛</button>
+      <button id="groupToFolders" class="link hidden" data-i18n="outline.view.toFolders">整理成文件夹</button>
+    </div>
     <div class="filters" id="filters">
       <div class="filter-row" id="statusFilters"></div>
       <div class="filter-row" id="diffFilters"></div>
@@ -118,6 +129,7 @@
     <div class="pane-head">
       <span class="pane-title" data-i18n="code.title">我的代码 · C++17</span>
       <div class="pane-actions">
+        <button id="historyBtn" title="查看这道题的代码历史版本" data-i18n-title="history.hint" data-i18n="history.button">历史</button>
         <button id="formatBtn" title="用 clang-format 格式化" data-i18n-title="code.formatHint" data-i18n="code.format">格式化</button>
         <select id="statusSelect" title="做题状态" data-i18n-title="problem.status">
           <option value="todo" data-i18n="problem.status.todo">未做</option>
@@ -198,12 +210,34 @@
   <div class="modal-box">
     <div class="modal-head"><h3 data-i18n="batch.title">批量添加题目</h3><button class="close" data-close>✕</button></div>
     <div class="modal-body">
-      <p class="dim" data-i18n="batch.hint">每行一个，或用逗号 / 空格分隔；也可以直接粘贴题单里的题号，链接会自动识别。</p>
-      <textarea id="batchInput" class="batch-input" spellcheck="false" placeholder="P1115 P1147 P1204&#10;P1387, P1496, P1569&#10;https://www.luogu.com.cn/problem/P2004" data-i18n-ph="batch.placeholder"></textarea>
-      <div class="batch-meta">
-        <span id="batchParsed" class="dim"></span>
-        <span id="batchDup" class="dim"></span>
+      <div class="batch-tabs">
+        <button class="tab-btn on" data-bmode="pids" data-i18n="batch.modePids">粘贴题号</button>
+        <button class="tab-btn" data-bmode="training" data-i18n="batch.modeTraining">洛谷题单</button>
       </div>
+
+      <div id="batchPidsBox">
+        <p class="dim" data-i18n="batch.hint">每行一个，或用逗号 / 空格分隔；也可以直接粘贴题单里的题号，链接会自动识别。</p>
+        <textarea id="batchInput" class="batch-input" spellcheck="false" placeholder="P1115 P1147 P1204&#10;P1387, P1496, P1569&#10;https://www.luogu.com.cn/problem/P2004" data-i18n-ph="batch.placeholder"></textarea>
+        <div class="batch-meta">
+          <span id="batchParsed" class="dim"></span>
+          <span id="batchDup" class="dim"></span>
+        </div>
+      </div>
+
+      <div id="batchTrainingBox" class="hidden">
+        <p class="dim" data-i18n="batch.trainingHint">填题单号或粘贴题单链接（例如 117 或 https://www.luogu.com.cn/training/117），拉取后可以一次性导入整个题单。</p>
+        <div class="row-inline">
+          <input id="trainingInput" type="text" placeholder="117 或 https://www.luogu.com.cn/training/117" data-i18n-ph="batch.trainingPlaceholder" autocomplete="off" spellcheck="false">
+          <button id="trainingFetch" class="primary" data-i18n="batch.trainingFetch">拉取题单</button>
+        </div>
+        <div id="trainingInfo" class="dim batch-training-info"></div>
+        <div id="trainingList" class="batch-training-list"></div>
+        <label class="inline batch-opt">
+          <input type="checkbox" id="trainingFolder" checked>
+          <span data-i18n="batch.trainingFolder">建成一个新文件夹（用题单名）</span>
+        </label>
+      </div>
+
       <label class="inline batch-opt">
         <input type="checkbox" id="batchFetch" checked>
         <span data-i18n="batch.fetchNow">立即抓取题面（较慢，但一次到位）</span>
@@ -218,6 +252,26 @@
           <span id="batchStatus" class="dim"></span>
           <button id="batchStop" class="danger" data-i18n="batch.stop">停止</button>
         </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 代码历史 ============ -->
+<div id="historyPanel" class="modal hidden">
+  <div class="modal-box">
+    <div class="modal-head"><h3 data-i18n="history.title">代码版本历史</h3><button class="close" data-close>✕</button></div>
+    <div class="modal-body">
+      <div id="historyFor" class="dim" style="font-size:12.5px;margin-bottom:8px"></div>
+      <div class="safety-actions">
+        <input id="historyLabel" type="text" placeholder="这一版的说明（可空）" data-i18n-ph="history.labelPlaceholder" style="flex:1;min-width:0">
+        <button id="historySave" class="primary" data-i18n="history.saveNow">存一版</button>
+      </div>
+      <div id="historyMsg" class="dim safety-msg"></div>
+      <div id="historyList" class="safety-list"></div>
+      <div id="historyDiffBox" class="hidden">
+        <h4 id="historyDiffTitle"></h4>
+        <pre id="historyDiff" class="diff-view"></pre>
       </div>
     </div>
   </div>
@@ -261,21 +315,30 @@
 <!-- ============ 导出 PDF ============ -->
 <div id="pdfPanel" class="modal hidden">
   <div class="modal-box">
-    <div class="modal-head"><h3 data-i18n="pdf.title">导出 PDF</h3><button class="close" data-close>✕</button></div>
+    <div class="modal-head"><h3 data-i18n="pdf.title">导出</h3><button class="close" data-close>✕</button></div>
     <div class="modal-body">
-      <div class="opt-row"><span class="opt-label" data-i18n="pdf.scope">范围</span>
+      <div class="opt-row"><span class="opt-label" data-i18n="pdf.format">格式</span>
+        <label class="radio"><input type="radio" name="pdfFormat" value="pdf" checked> <span data-i18n="pdf.format.pdf">PDF</span></label>
+        <label class="radio"><input type="radio" name="pdfFormat" value="md"> <span data-i18n="pdf.format.md">Markdown</span></label>
+        <label class="radio"><input type="radio" name="pdfFormat" value="png"> <span data-i18n="pdf.format.png">PNG 分享卡片</span></label>
+      </div>
+      <div class="opt-row" id="pdfScopeRow"><span class="opt-label" data-i18n="pdf.scope">范围</span>
         <label class="radio"><input type="radio" name="pdfScope" value="all" checked> <span data-i18n="pdf.scope.all">全部题目</span></label>
         <label class="radio"><input type="radio" name="pdfScope" value="current"> <span data-i18n="pdf.scope.current">当前选中（题目或文件夹）</span></label>
       </div>
-      <div class="opt-row"><span class="opt-label" data-i18n="pdf.theme">配色</span><div id="pdfThemes" class="theme-list"></div></div>
-      <div class="opt-row"><span class="opt-label" data-i18n="pdf.layout">版式</span>
+      <div class="opt-row" id="pdfThemeRow"><span class="opt-label" data-i18n="pdf.theme">配色</span><div id="pdfThemes" class="theme-list"></div></div>
+      <div class="opt-row" id="pdfLayoutRow"><span class="opt-label" data-i18n="pdf.layout">版式</span>
         <label class="radio"><input type="radio" name="pdfLayout" value="two" checked> <span data-i18n="pdf.layout.two">题目与代码左右分栏</span></label>
         <label class="radio"><input type="radio" name="pdfLayout" value="one"> <span data-i18n="pdf.layout.one">单栏上下排列</span></label>
       </div>
-      <div class="opt-row"><span class="opt-label" data-i18n="pdf.content">内容</span>
+      <div class="opt-row" id="pdfContentRow"><span class="opt-label" data-i18n="pdf.content">内容</span>
         <label class="radio"><input type="checkbox" id="pdfCode" checked> <span data-i18n="pdf.includeCode">包含我的代码</span></label>
         <label class="radio"><input type="checkbox" id="pdfNote" checked> <span data-i18n="pdf.includeNote">包含我的笔记</span></label>
       </div>
+      <div class="opt-row hidden" id="pdfTocRow"><span class="opt-label" data-i18n="pdf.toc">目录</span>
+        <label class="radio"><input type="checkbox" id="pdfToc" checked> <span data-i18n="pdf.tocHint">在开头生成一份带链接的目录</span></label>
+      </div>
+      <div class="dim" id="pdfHint" style="font-size:12px;margin:2px 0 6px"></div>
       <div class="prompt-actions">
         <button class="ghost" data-close data-i18n="common.cancel">取消</button>
         <button id="pdfGo" class="primary" data-i18n="pdf.generate">生成 PDF 文件</button>

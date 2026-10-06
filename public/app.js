@@ -17,7 +17,7 @@ const S = {
   saveTimer: null,
   running: false,
   backfilling: new Set(),
-  batch: { stop: false },
+  batch: { stop: false, mode: "pids", training: null },
   tab: "io",
 };
 
@@ -84,7 +84,7 @@ function pushUndo(label) {
 }
 function undo() {
   const last = S.undo.pop();
-  if (!last) return toast(t("toast.noUndo"), true);
+  if (!last) { toast(t("toast.noUndo"), true); return false; }
   try {
     S.doc.tree = JSON.parse(last.snapshot);
     if (!findEntry(S.currentId)) S.currentId = null;
@@ -94,9 +94,22 @@ function undo() {
     renderProblem();
     renderBatchBar();
     toast(t("toast.undone", { label: last.label }));
+    return true;
   } catch (e) {
     toast(t("toast.undoFailed", { message: e.message }), true);
+    return false;
   }
+}
+
+/** Ctrl+Z 撤销结构改动。只在焦点不在输入框时接管，免得抢掉打字时浏览器自带的文字撤销。 */
+function bindUndoShortcut() {
+  document.addEventListener("keydown", (e) => {
+    if (!(e.ctrlKey || e.metaKey) || e.shiftKey || e.altKey) return;
+    if (e.key !== "z" && e.key !== "Z") return;
+    const el = document.activeElement;
+    if (el && (el.tagName === "TEXTAREA" || el.tagName === "INPUT" || el.isContentEditable)) return;
+    if (undo()) e.preventDefault();
+  });
 }
 function withUndo(label, fn) {
   pushUndo(label);
@@ -269,11 +282,152 @@ function filterTree(nodes) {
   return out;
 }
 
+/* ============================ 分类索引（按算法 / 按比赛） ============================ */
+
+/** 从题名里认出比赛名。洛谷的题名习惯把比赛放在开头，如 [NOIP 2008 提高组]、【模板】、[USACO1.2] */
+function contestOf(title) {
+  const s = String(title ?? "").trim();
+  const m = /^[[【]([^\]】]+)[\]】]/.exec(s);
+  if (!m) return "";
+  let name = m[1].trim();
+  if (name.includes("/")) name = name.split("/")[0].trim();   // [IOI 1994 / USACO1.5] → IOI 1994
+  // USACO1.2 / USACO 1.2 → USACO；CSP-J 2020 保持原样
+  name = name.replace(/^([A-Za-z]{2,})\s*[\d.]+\s*$/, "$1").trim();
+  return name;
+}
+
+/** 把题目按某种方式分组，返回 [{name, items}]（组内按题号排序，组间按数量从多到少） */
+function groupProblems(kind) {
+  const probs = flattenProblems();
+  const map = new Map();
+  const push = (key, p) => {
+    if (!map.has(key)) map.set(key, []);
+    map.get(key).push(p);
+  };
+  for (const p of probs) {
+    if (kind === "tag") {
+      const tags = (p.tagNames ?? []).filter(Boolean);
+      if (tags.length) for (const tg of tags) push(tg, p);
+      else push(t("outline.untagged"), p);
+    } else {
+      push(contestOf(p.title) || t("outline.otherContest"), p);
+    }
+  }
+  const byPid = (a, b) => String(a.pid).localeCompare(String(b.pid), "zh-CN", { numeric: true });
+  return [...map.entries()]
+    .map(([name, items]) => ({ name, items: items.slice().sort(byPid) }))
+    .sort((a, b) => b.items.length - a.items.length || a.name.localeCompare(b.name, "zh-CN"));
+}
+
+/** 生成一条「题目」行（树视图和分组视图共用） */
+function makeProblemRow(node) {
+  const li = document.createElement("li");
+  const d = diffOf(node);
+  li.className = "row problem";
+  li.dataset.id = node.id;
+  if (node.id === S.currentId) li.classList.add("sel");
+  if (node.stub) li.classList.add("stub");
+  if (S.selected.has(node.id)) li.classList.add("multi");
+  li.innerHTML =
+    `<span class="o-diff" style="background:${d.color}" title="${esc(d.name)}"></span>` +
+    `<span class="o-pid">${esc(node.pid)}</span>` +
+    `<span class="o-title" title="${esc(node.title)}">${esc(node.title)}</span>` +
+    (node.stub ? `<span class="o-stub" title="${t("title.stub")}">${t("outline.stub")}</span>` : "") +
+    `<span class="o-dot ${esc(node.status ?? "todo")}" title="${esc(STATUS_TEXT[node.status ?? "todo"])}"></span>` +
+    `<button class="o-del" title="${t("title.delete")}">✕</button>`;
+  li.querySelector(".o-del").onclick = (e) => { e.stopPropagation(); deleteNodes([node]); };
+  li.onclick = (e) => onRowClick(e, node);
+  return li;
+}
+
+/** 分组视图：组是一行伪文件夹，点标题展开/收起 */
+function renderGrouped(ul, kind) {
+  const groups = groupProblems(kind);
+  if (!groups.length) return;
+  const collapsed = S.groupCollapsed ?? (S.groupCollapsed = {});
+  for (const g of groups) {
+    const key = `${kind}:${g.name}`;
+    const isCollapsed = collapsed[key] === true;
+    const head = document.createElement("li");
+    head.className = "row folder group";
+    head.dataset.group = key;
+    head.innerHTML =
+      `<span class="tw">${isCollapsed ? "▶" : "▼"}</span>` +
+      `<span class="g-icon">${kind === "tag" ? "🏷" : "🏆"}</span>` +
+      `<span class="o-title" title="${esc(g.name)}">${esc(g.name)}</span>` +
+      `<span class="o-count">${g.items.length}</span>`;
+    head.onclick = () => {
+      collapsed[key] = !isCollapsed;
+      renderOutline();
+    };
+    ul.appendChild(head);
+    if (isCollapsed) continue;
+    for (const p of g.items) {
+      const li = makeProblemRow(p);
+      li.style.paddingLeft = "22px";
+      ul.appendChild(li);
+    }
+  }
+}
+
+/** 把「按比赛」的分组落成真实文件夹（每道题只属于一个比赛，所以不会重复） */
+async function groupsToFolders() {
+  const groups = groupProblems("contest");
+  if (!groups.length) return;
+  if (!confirm(t("outline.view.toFoldersConfirm", { n: groups.length }))) return;
+  pushUndo();
+  const seen = new Set();
+  for (const g of groups) {
+    const folder = { id: uid(), kind: "folder", name: g.name, collapsed: false, children: [] };
+    S.doc.tree.push(folder);
+    for (const p of g.items) {
+      if (seen.has(p.id)) continue;   // 保险：同一个节点不重复搬
+      seen.add(p.id);
+      removeNode(p.id);
+      folder.children.push(p);
+    }
+  }
+  // 清掉空文件夹（搬完之后原来的层级可能空了）
+  const prune = (list) => {
+    for (let i = list.length - 1; i >= 0; i--) {
+      if (list[i].kind === "folder") {
+        prune(list[i].children ?? []);
+        if (!(list[i].children ?? []).length) list.splice(i, 1);
+      }
+    }
+  };
+  prune(S.doc.tree);
+  markDirty();
+  setOutlineView("tree");   // 连同按钮高亮一起切回去
+  toast(t("outline.view.toFoldersDone", { n: groups.length }), false, 4000);
+}
+
+function setOutlineView(view) {
+  S.outlineView = view;
+  for (const btn of document.querySelectorAll("#outlineViews .tab-btn")) {
+    btn.classList.toggle("active", btn.dataset.view === view);
+  }
+  $("groupToFolders").classList.toggle("hidden", view !== "contest");
+  // 筛选和批量拖动只在「我的文件夹」视图里可用
+  $("filters").classList.toggle("hidden", view !== "tree");
+  renderOutline();
+}
+
 function renderOutline() {
   const ul = $("outline");
   ul.innerHTML = "";
   const active = hasFilter();
   const rows = [];
+  const view = S.outlineView ?? "tree";
+
+  if (view !== "tree") {
+    renderGrouped(ul, view);
+    $("emptyHint").classList.toggle("hidden", flattenProblems().length > 0);
+    rows.push(...ul.querySelectorAll(".row"));
+    renderFilters();
+    renderBatchBar();
+    return;
+  }
 
   const renderNodes = (entries, depth, parentEl) => {
     for (const entry of entries) {
@@ -313,19 +467,10 @@ function renderOutline() {
         rows.push(li);
         if (!node.collapsed || active) renderNodes(entry.children, depth + 1, parentEl);
       } else {
-        const d = diffOf(node);
-        li.classList.add("problem");
-        if (node.id === S.currentId) li.classList.add("sel");
-        if (node.stub) li.classList.add("stub");
-        li.innerHTML =
-          `<span class="o-diff" style="background:${d.color}" title="${esc(d.name)}"></span>` +
-          `<span class="o-pid">${esc(node.pid)}</span>` +
-          `<span class="o-title" title="${esc(node.title)}">${esc(node.title)}</span>` +
-          (node.stub ? `<span class="o-stub" title="${t("title.stub")}">${t("outline.stub")}</span>` : "") +
-          `<span class="o-dot ${esc(node.status ?? "todo")}" title="${esc(STATUS_TEXT[node.status ?? "todo"])}"></span>` +
-          `<button class="o-del" title="${t("title.delete")}">✕</button>`;
-        li.querySelector(".o-del").onclick = (e) => { e.stopPropagation(); deleteNodes([node]); };
-        li.onclick = (e) => onRowClick(e, node);
+        // 题目行：和分组视图共用同一个生成函数，避免两处样式走样
+        const li = makeProblemRow(node);
+        li.style.paddingLeft = `${6 + depth * 14}px`;
+        li.draggable = true;
         parentEl.appendChild(li);
         rows.push(li);
       }
@@ -1003,6 +1148,8 @@ async function runCode(forJudge) {
     const total = result.tests?.reduce((a, t) => a + t.timeMs, 0) ?? 0;
     setResult(result, result.ok ? t("run.summary", { n: result.tests?.length ?? 0, ms: total }) : t("run.compileFailed"));
     if (result.ok && forJudge && result.tests?.length && result.tests.every((t) => t.verdict === "AC")) {
+      // 全部样例通过时，自动把这版代码记进历史（内容没变会自动去重）
+      saveCurrentVersion({ label: t("history.autoAc"), result: "AC", silent: true });
       if ((p.status ?? "todo") !== "ac") {
         p.status = "ac";
         $("statusSelect").value = "ac";
@@ -1194,6 +1341,170 @@ async function saveNow() {
     updateSaveState(true);
     toast(t("toast.saveFailed", { message: e.message }), true);
   }
+}
+
+/* ============================ 代码版本历史 ============================ */
+
+/** 行级 diff（LCS）。返回 [{t:"same"|"add"|"del", text}]，行数太大时退化成简单对比。 */
+function diffLines(before, after) {
+  const A = String(before ?? "").split("\n");
+  const B = String(after ?? "").split("\n");
+  // 行数过多时不做 LCS（避免几百万格），退化成逐行比较
+  if (A.length * B.length > 400000) {
+    const out = [];
+    const n = Math.max(A.length, B.length);
+    for (let i = 0; i < n; i++) {
+      if (A[i] === B[i]) out.push({ t: "same", text: A[i] ?? "" });
+      else {
+        if (A[i] !== undefined) out.push({ t: "del", text: A[i] });
+        if (B[i] !== undefined) out.push({ t: "add", text: B[i] });
+      }
+    }
+    return out;
+  }
+  const n = A.length, m = B.length;
+  const dp = Array.from({ length: n + 1 }, () => new Uint16Array(m + 1));
+  for (let i = n - 1; i >= 0; i--) {
+    for (let j = m - 1; j >= 0; j--) {
+      dp[i][j] = A[i] === B[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+    }
+  }
+  const out = [];
+  let i = 0, j = 0;
+  while (i < n && j < m) {
+    if (A[i] === B[j]) { out.push({ t: "same", text: A[i] }); i++; j++; }
+    else if (dp[i + 1][j] >= dp[i][j + 1]) { out.push({ t: "del", text: A[i] }); i++; }
+    else { out.push({ t: "add", text: B[j] }); j++; }
+  }
+  while (i < n) out.push({ t: "del", text: A[i++] });
+  while (j < m) out.push({ t: "add", text: B[j++] });
+  return out;
+}
+
+function renderDiff(before, after) {
+  const rows = diffLines(before, after);
+  const add = rows.filter((r) => r.t === "add").length;
+  const del = rows.filter((r) => r.t === "del").length;
+  const body = rows.map((r) => {
+    const sign = r.t === "add" ? "+" : r.t === "del" ? "-" : " ";
+    return `<span class="d-${r.t}">${esc(sign + " " + r.text)}</span>`;
+  }).join("\n");
+  return { html: body, add, del };
+}
+
+function historyMsg(text) {
+  const el = $("historyMsg");
+  if (el) el.textContent = text ?? "";
+}
+
+async function openHistory() {
+  const p = currentProblem();
+  if (!p) return toast(t("toast.pickProblem"), true);
+  $("historyPanel").classList.remove("hidden");
+  $("historyDiffBox").classList.add("hidden");
+  $("historyFor").textContent = `${p.pid} ${p.title ?? ""}`;
+  $("historyLabel").value = "";
+  historyMsg("");
+  await renderHistoryList();
+}
+
+async function renderHistoryList() {
+  const p = currentProblem();
+  const box = $("historyList");
+  if (!p) return;
+  box.innerHTML = `<div class="dim">…</div>`;
+  try {
+    const { list } = await api("/api/snapshot/list", { pid: p.pid });
+    if (!list.length) {
+      box.innerHTML = `<div class="dim">${t("history.empty")}</div>`;
+      return;
+    }
+    box.innerHTML = list.map((s) => `
+      <div class="safety-item">
+        <span class="s-name">${esc(String(s.at).replace("T", " ").slice(0, 19))}</span>
+        <span class="s-meta">${t("history.lines", { n: s.lines || "?" })} · ${(s.bytes / 1024).toFixed(1)} KB</span>
+        ${s.result ? `<span class="snap-result ${s.result === "AC" ? "ac" : ""}">${esc(s.result)}</span>` : ""}
+        ${s.label ? `<span class="s-meta" title="${esc(s.label)}">${esc(s.label)}</span>` : ""}
+        <button class="ghost" data-hdiff="${esc(s.id)}">${t("history.diff")}</button>
+        <button class="ghost" data-hrestore="${esc(s.id)}">${t("history.restore")}</button>
+        <button class="danger" data-hdel="${esc(s.id)}">${t("history.delete")}</button>
+      </div>`).join("");
+  } catch (e) {
+    box.innerHTML = `<div class="dim">${esc(e.message)}</div>`;
+  }
+}
+
+async function saveCurrentVersion({ label = "", result = "", silent = false } = {}) {
+  const p = currentProblem();
+  if (!p) return null;
+  const code = editor.ta.value;
+  if (!code.trim()) { if (!silent) toast(t("history.nothingToSave"), true); return null; }
+  try {
+    const r = await api("/api/snapshot/save", { pid: p.pid, code, label, result });
+    if (!silent) {
+      toast(r.snapshot?.deduped ? t("history.deduped") : t("history.saved"), false, 3500);
+      historyMsg("");
+      await renderHistoryList();
+    }
+    return r.snapshot;
+  } catch (e) {
+    if (!silent) toast(t("history.saveFailed", { message: e.message }), true);
+    return null;
+  }
+}
+
+function bindHistory() {
+  $("historyBtn").onclick = openHistory;
+  $("historySave").onclick = async () => {
+    historyMsg("");
+    await saveCurrentVersion({ label: $("historyLabel").value.trim() });
+    $("historyLabel").value = "";
+  };
+  $("historyPanel").addEventListener("click", async (e) => {
+    const p = currentProblem();
+    if (!p) return;
+
+    const diffBtn = e.target.closest("[data-hdiff]");
+    if (diffBtn) {
+      try {
+        const { code } = await api("/api/snapshot/get", { pid: p.pid, id: diffBtn.dataset.hdiff });
+        const d = renderDiff(code, editor.ta.value);
+        $("historyDiffBox").classList.remove("hidden");
+        $("historyDiffTitle").textContent = t("history.diffTitle", { add: d.add, del: d.del });
+        $("historyDiff").innerHTML = d.html || `<span class="d-meta">${esc(t("history.noDiff"))}</span>`;
+      } catch (err) { historyMsg(err.message); }
+      return;
+    }
+
+    const restoreBtn = e.target.closest("[data-hrestore]");
+    if (restoreBtn) {
+      const id = restoreBtn.dataset.hrestore;
+      if (!confirm(t("history.confirmRestore"))) return;
+      try {
+        const { code } = await api("/api/snapshot/get", { pid: p.pid, id });
+        // 覆盖前先把当前这版存下来，免得点错了找不回
+        await saveCurrentVersion({ label: t("history.beforeRestore"), silent: true });
+        p.code = code;
+        editor.ta.value = code;
+        paintEditor();
+        markDirty();
+        toast(t("history.restored"), false, 4000);
+        $("historyDiffBox").classList.add("hidden");
+        await renderHistoryList();
+      } catch (err) { historyMsg(err.message); }
+      return;
+    }
+
+    const delBtn = e.target.closest("[data-hdel]");
+    if (delBtn) {
+      if (!confirm(t("history.confirmDelete"))) return;
+      try {
+        await api("/api/snapshot/delete", { pid: p.pid, id: delBtn.dataset.hdel });
+        $("historyDiffBox").classList.add("hidden");
+        await renderHistoryList();
+      } catch (err) { historyMsg(err.message); }
+    }
+  });
 }
 
 /* ============================ 数据安全面板 ============================ */
@@ -1440,7 +1751,47 @@ function renderSync(r) {
   };
 }
 
-/* ============================ PDF ============================ */
+/* ============================ 导出（PDF / Markdown / PNG 卡片） ============================ */
+function exportFormat() {
+  return document.querySelector("input[name=pdfFormat]:checked")?.value ?? "pdf";
+}
+function exportScope() {
+  return document.querySelector("input[name=pdfScope]:checked")?.value ?? "all";
+}
+
+/** 按格式切换可见选项与按钮文案 */
+function syncExportOptions() {
+  const fmt = exportFormat();
+  const isPdf = fmt === "pdf";
+  const isMd = fmt === "md";
+  const isPng = fmt === "png";
+
+  $("pdfThemeRow").classList.toggle("hidden", !(isPdf || isPng));
+  $("pdfLayoutRow").classList.toggle("hidden", !isPdf);
+  $("pdfContentRow").classList.toggle("hidden", !isPdf);
+  // 目录：Markdown（全部范围）和 PDF（全部范围）都支持
+  $("pdfTocRow").classList.toggle("hidden", !((isMd || isPdf) && exportScope() === "all"));
+
+  // PNG 卡片是单题的：自动切到「当前选中」并禁用切换
+  if (isPng) {
+    const cur = document.querySelector("input[name=pdfScope][value=current]");
+    const all = document.querySelector("input[name=pdfScope][value=all]");
+    if (cur && all) { cur.checked = true; all.disabled = true; cur.disabled = true; }
+  } else {
+    for (const el of document.querySelectorAll("input[name=pdfScope]")) el.disabled = false;
+  }
+
+  $("pdfGo").textContent = isPdf ? t("pdf.generateButton")
+    : isMd ? t("pdf.generateMd") : t("pdf.generatePng");
+
+  const hints = {
+    pdf: t("pdf.hintPdf"),
+    md: t("pdf.hintMd"),
+    png: t("pdf.hintPng"),
+  };
+  $("pdfHint").textContent = hints[fmt] ?? "";
+}
+
 function openPdf() {
   const box = $("pdfThemes");
   if (!box.children.length) {
@@ -1448,6 +1799,7 @@ function openPdf() {
       `<label class="radio theme-opt"><input type="radio" name="pdfTheme" value="${esc(t.id)}"${i === 0 ? " checked" : ""}> ${esc(t.name)}</label>`).join("");
   }
   $("pdfPanel").classList.remove("hidden");
+  syncExportOptions();
   loadPdfHistory();
 }
 async function loadPdfHistory() {
@@ -1459,39 +1811,62 @@ async function loadPdfHistory() {
       $("pdfHistory").innerHTML = `<div class="dim" style="font-size:11.5px;margin-top:10px">${t("pdf.noHistory")}<code title="${esc(dir)}">${esc(shortDir)}/</code></div>`;
       return;
     }
+    const badge = { pdf: "PDF", md: "MD", png: "PNG" };
     $("pdfHistory").innerHTML = `<div class="pdf-history-title">${t("pdf.historyTitle")}</div>` +
       files.map((f) => `<div class="pdf-history-item">
+        <span class="s-kind" style="margin-right:6px">${badge[f.ext] ?? (f.ext ?? "").toUpperCase()}</span>
         <a href="/api/export/download/${encodeURIComponent(f.name)}" download>${esc(f.name)}</a>
         <span class="dim">${(f.size / 1024).toFixed(0)} KB · ${new Date(f.at).toLocaleString("zh-CN")}</span></div>`).join("");
   } catch {}
 }
-async function doExportPdf() {
-  const scope = document.querySelector("input[name=pdfScope]:checked").value;
-  const theme = document.querySelector("input[name=pdfTheme]:checked").value;
-  const layout = document.querySelector("input[name=pdfLayout]:checked").value;
+
+function exportDownload(r) {
+  const a = document.createElement("a");
+  a.href = r.downloadUrl;
+  a.download = r.file;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
+async function doExport() {
+  const fmt = exportFormat();
+  const scope = exportScope();
+  const theme = document.querySelector("input[name=pdfTheme]:checked")?.value ?? "darkcode";
+  const layout = document.querySelector("input[name=pdfLayout]:checked")?.value ?? "two";
   if (scope === "current" && !S.currentId) return toast(t("toast.pickProblemOrFolder"), true);
+  if (fmt === "png" && scope !== "current") return toast(t("toast.pickProblemOrFolder"), true);
+
   const btn = $("pdfGo");
+  const label = btn.textContent;
   btn.disabled = true;
   btn.textContent = t("pdf.generating");
   $("pdfStatus").innerHTML = `<span class="dim">${t("pdf.renderingHint")}</span>`;
   try {
-    const r = await api("/api/export/pdf", {
-      theme, scope, targetId: S.currentId,
-      twoColumn: layout === "two", includeCode: $("pdfCode").checked, includeNote: $("pdfNote").checked,
-    });
-    $("pdfStatus").innerHTML = t("pdf.generated", { file: `<code>${esc(r.file)}</code>`, size: (r.size / 1024).toFixed(0) });
-    const a = document.createElement("a");
-    a.href = r.downloadUrl;
-    a.download = r.file;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
+    let r;
+    if (fmt === "md") {
+      r = await api("/api/export/markdown", { scope, targetId: S.currentId, toc: $("pdfToc").checked });
+      $("pdfStatus").innerHTML = t("pdf.mdGenerated", {
+        file: `<code>${esc(r.file)}</code>`, kb: (r.size / 1024).toFixed(1), n: r.count ?? 0,
+      });
+    } else if (fmt === "png") {
+      r = await api("/api/export/card", { targetId: S.currentId, theme });
+      $("pdfStatus").innerHTML = t("pdf.pngGenerated", { file: `<code>${esc(r.file)}</code>`, size: (r.size / 1024).toFixed(0) });
+    } else {
+      r = await api("/api/export/pdf", {
+        theme, scope, targetId: S.currentId,
+        twoColumn: layout === "two", includeCode: $("pdfCode").checked, includeNote: $("pdfNote").checked,
+        toc: scope === "all" && $("pdfToc").checked,
+      });
+      $("pdfStatus").innerHTML = t("pdf.generated", { file: `<code>${esc(r.file)}</code>`, size: (r.size / 1024).toFixed(0) });
+    }
+    exportDownload(r);
     loadPdfHistory();
   } catch (e) {
     $("pdfStatus").innerHTML = `<span class="err-line">${t("pdf.failed", { message: esc(e.message) })}</span>`;
   } finally {
     btn.disabled = false;
-    btn.textContent = t("pdf.generateButton");
+    btn.textContent = label;
   }
 }
 
@@ -1847,6 +2222,13 @@ function bindEvents() {
   });
   $("pidInput").addEventListener("blur", () => setTimeout(hideSuggest, 200));
 
+  // 索引视图切换：我的文件夹 / 按算法 / 按比赛
+  for (const btn of document.querySelectorAll("#outlineViews .tab-btn")) {
+    btn.onclick = () => setOutlineView(btn.dataset.view);
+  }
+  $("groupToFolders").onclick = groupsToFolders;
+  bindUndoShortcut();
+
   // 文件夹
   $("addFolder").onclick = async () => {
     const f = newFolder();
@@ -1943,6 +2325,7 @@ function bindEvents() {
   $("runAllTests").onclick = runAllTests;
 
   // 数据安全面板
+  bindHistory();
   $("safetyBackup").onclick = async () => {
     safetyMsg(t("safety.backingUp"));
     try {
@@ -1995,6 +2378,13 @@ function bindEvents() {
   $("batchInput").addEventListener("keydown", (e) => {
     if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); startBatchAdd(); }
   });
+  for (const b of document.querySelectorAll(".batch-tabs .tab-btn")) {
+    b.onclick = () => setBatchMode(b.dataset.bmode);
+  }
+  $("trainingFetch").onclick = loadTraining;
+  $("trainingInput").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); loadTraining(); }
+  });
   $("batchGo").onclick = startBatchAdd;
   $("batchStop").onclick = () => { S.batch.stop = true; };
 
@@ -2018,7 +2408,9 @@ function bindEvents() {
   $("syncFetch").onclick = doSyncFetch;
   $("syncUid").addEventListener("keydown", (e) => { if (e.key === "Enter") doSyncFetch(); });
   $("pdfBtn").onclick = openPdf;
-  $("pdfGo").onclick = doExportPdf;
+  $("pdfGo").onclick = doExport;
+  for (const el of document.querySelectorAll("input[name=pdfFormat]")) el.onchange = syncExportOptions;
+  for (const el of document.querySelectorAll("input[name=pdfScope]")) el.onchange = syncExportOptions;
   $("statsBtn").onclick = showStats;
   $("mdBtn").onclick = showMarkdown;
   $("settingsBtn").onclick = showSettings;
@@ -2189,6 +2581,22 @@ async function fetchSuggest(q) {
 function hideSuggest() { $("suggest").classList.add("hidden"); }
 
 /* ============================ 批量添加 ============================ */
+/** 当前模式：pids（粘贴题号）| training（洛谷题单） */
+function batchMode() { return S.batch.mode ?? "pids"; }
+function setBatchMode(mode) {
+  S.batch.mode = mode === "training" ? "training" : "pids";
+  for (const b of document.querySelectorAll(".batch-tabs .tab-btn")) {
+    b.classList.toggle("on", b.dataset.bmode === S.batch.mode);
+  }
+  $("batchPidsBox").classList.toggle("hidden", S.batch.mode !== "pids");
+  $("batchTrainingBox").classList.toggle("hidden", S.batch.mode !== "training");
+  if (S.batch.mode === "pids") updateBatchStats();
+  else updateTrainingStats();
+  $("batchGo").disabled = S.batch.mode === "pids"
+    ? parsePidList($("batchInput").value).length === 0
+    : !S.batch.training;
+}
+
 /** 从粘贴的文本里解析题号：支持逗号/空格/换行分隔，也支持整条洛谷链接 */
 function parsePidList(text) {
   const tokens = String(text ?? "").split(/[\s,，、;；|]+/).map((s) => s.trim()).filter(Boolean);
@@ -2210,6 +2618,67 @@ function parsePidList(text) {
   return out;
 }
 
+/* ---------- 洛谷题单模式 ---------- */
+
+function trainingItem(p) {
+  const d = DIFF[p.difficulty] ?? DIFF[0];
+  return {
+    id: uid("p"), kind: "problem", pid: p.pid, title: p.title || p.pid,
+    difficulty: p.difficulty ?? 0, difficultyName: d.name, difficultyColor: d.color,
+    status: "todo", code: "", note: "", tests: [], addedAt: Date.now(), stub: true,
+  };
+}
+
+/** 题单里还没进刷题本的题 */
+function trainingFresh() {
+  const tr = S.batch.training;
+  if (!tr) return [];
+  const existing = new Set(flattenProblems().map((p) => p.pid));
+  return tr.problems.filter((p) => !existing.has(p.pid));
+}
+
+function updateTrainingStats() {
+  const tr = S.batch.training;
+  const box = $("trainingList");
+  if (!tr) {
+    $("trainingInfo").textContent = "";
+    box.innerHTML = "";
+    $("batchGo").disabled = true;
+    return { fresh: [], dup: 0 };
+  }
+  const existing = new Set(flattenProblems().map((p) => p.pid));
+  const fresh = tr.problems.filter((p) => !existing.has(p.pid));
+  $("trainingInfo").innerHTML =
+    `${t("batch.trainingLoaded", { name: esc(tr.name), n: tr.count })} ` +
+    `${t("batch.parsed", { n: tr.count, ok: fresh.length })}`;
+  box.innerHTML = tr.problems.map((p) =>
+    `<span class="tp${existing.has(p.pid) ? " has" : ""}" title="${esc(p.title)}">${esc(p.pid)}</span>`).join("");
+  $("batchGo").disabled = fresh.length === 0;
+  return { fresh, dup: tr.count - fresh.length };
+}
+
+async function loadTraining() {
+  const raw = $("trainingInput").value.trim();
+  if (!raw) return toast(t("batch.trainingNeedId"), true);
+  $("trainingFetch").disabled = true;
+  const old = $("trainingFetch").textContent;
+  $("trainingFetch").textContent = t("batch.trainingFetching");
+  try {
+    const { training } = await api("/api/training/fetch", { id: raw });
+    S.batch.training = training;
+    updateTrainingStats();
+    const fresh = trainingFresh().length;
+    toast(t("batch.trainingDone", { name: training.name, n: training.count, ok: fresh }), false, 5000);
+  } catch (e) {
+    S.batch.training = null;
+    updateTrainingStats();
+    toast(t("batch.trainingFailed", { message: e.message }), true, 6000);
+  } finally {
+    $("trainingFetch").disabled = false;
+    $("trainingFetch").textContent = old;
+  }
+}
+
 function updateBatchStats() {
   const parsed = parsePidList($("batchInput").value);
   const existing = new Set(flattenProblems().map((p) => p.pid));
@@ -2223,10 +2692,13 @@ function updateBatchStats() {
 
 function openBatchAdd() {
   $("batchInput").value = "";
+  $("trainingInput").value = "";
+  S.batch.training = null;
+  S.batch.stop = false;
   $("batchProgress").classList.add("hidden");
   $("batchProgressFill").style.width = "0%";
   $("batchStatus").textContent = "";
-  updateBatchStats();
+  setBatchMode("pids");
   $("batchPanel").classList.remove("hidden");
   $("batchInput").focus();
 }
@@ -2237,34 +2709,70 @@ function setBatchProgress(done, total, ok, fail, pid) {
 }
 
 async function startBatchAdd() {
-  const { fresh, dup } = updateBatchStats();
-  if (!fresh.length) return toast(t("batch.nothing"), true);
   const fetchNow = $("batchFetch").checked;
+  const mode = batchMode();
+  let items, dupCount = 0, newFolderName = null;
 
-  pushUndo(t("undo.batchAdd", { n: fresh.length }));
-  const items = fresh.map((pid) => ({
-    id: uid("p"), kind: "problem", pid, title: pid, status: "todo",
-    code: "", note: "", tests: [], addedAt: Date.now(), stub: true,
-  }));
+  if (mode === "training") {
+    const tr = S.batch.training;
+    if (!tr) return toast(t("batch.trainingNeedId"), true);
+    const { fresh, dup } = updateTrainingStats();
+    if (!fresh.length) return toast(t("batch.nothing"), true);
+    items = fresh.map(trainingItem);
+    dupCount = dup;
+    if ($("trainingFolder").checked) newFolderName = tr.name;
+  } else {
+    const { fresh, dup } = updateBatchStats();
+    if (!fresh.length) return toast(t("batch.nothing"), true);
+    items = fresh.map((pid) => ({
+      id: uid("p"), kind: "problem", pid, title: pid, status: "todo",
+      code: "", note: "", tests: [], addedAt: Date.now(), stub: true,
+    }));
+    dupCount = dup.length;
+  }
+
+  pushUndo(t("undo.batchAdd", { n: items.length }));
 
   // 先全部以「待补全」落进树里，用户立刻能看到
-  const e = findEntry(S.currentId);
-  if (e?.node.kind === "folder") {
-    e.node.children = e.node.children ?? [];
-    e.node.children.unshift(...items);
-    e.node.collapsed = false;
-  } else if (e?.parent) {
-    const list = e.parent.children;
-    list.splice(list.findIndex((n) => n.id === e.node.id) + 1, 0, ...items);
+  // 题单模式且勾了「建成文件夹」时：新建一个以题单命名的文件夹，题目按题单顺序放进去
+  if (newFolderName) {
+    const folder = newFolder(newFolderName);
+    folder.children = items;
+    const e0 = findEntry(S.currentId);
+    if (e0?.node.kind === "folder") {
+      e0.node.children = e0.node.children ?? [];
+      e0.node.children.unshift(folder);
+      e0.node.collapsed = false;
+    } else if (e0?.parent) {
+      const list = e0.parent.children;
+      list.splice(list.findIndex((n) => n.id === e0.node.id) + 1, 0, folder);
+    } else {
+      S.doc.tree.push(folder);
+    }
+    clearAllFilters();
+    markDirty();
+    renderOutline();
+    selectNode(items[0].id);
+    toast(t("batch.trainingFolderMade", { name: newFolderName, n: items.length }), false, 5000);
+    if (dupCount) toast(t("batch.dupHint", { n: dupCount }), false, 4000);
   } else {
-    S.doc.tree.push(...items);
+    const e = findEntry(S.currentId);
+    if (e?.node.kind === "folder") {
+      e.node.children = e.node.children ?? [];
+      e.node.children.unshift(...items);
+      e.node.collapsed = false;
+    } else if (e?.parent) {
+      const list = e.parent.children;
+      list.splice(list.findIndex((n) => n.id === e.node.id) + 1, 0, ...items);
+    } else {
+      S.doc.tree.push(...items);
+    }
+    clearAllFilters();
+    markDirty();
+    renderOutline();
+    selectNode(items[0].id);
+    if (dupCount) toast(t("batch.dupHint", { n: dupCount }), false, 4000);
   }
-  clearAllFilters();
-  markDirty();
-  renderOutline();
-  selectNode(items[0].id);
-
-  if (dup.length) toast(t("batch.dupHint", { n: dup.length }), false, 4000);
   if (!fetchNow) {
     $("batchPanel").classList.add("hidden");
     toast(t("batch.noFetch", { n: items.length }), false, 5000);
@@ -2347,6 +2855,17 @@ async function addProblemByPid(pidRaw) {
   }
 }
 
+/* ============================ PWA ============================ */
+/** 注册 Service Worker（只用于满足“可安装”，不做任何缓存 —— 本地应用不能挡旧代码/旧数据） */
+async function registerSw() {
+  if (!("serviceWorker" in navigator)) return;   // 不支持就直接跳过
+  try {
+    await navigator.serviceWorker.register("/sw.js", { scope: "/" });
+  } catch {
+    /* 注册失败不影响使用（就少了个“安装到桌面”的入口） */
+  }
+}
+
 /* ============================ 启动 ============================ */
 async function boot() {
   editor.ta = $("code");
@@ -2382,6 +2901,9 @@ async function boot() {
   else renderProblem();
   updateSaveState(false);
   switchTab("io");
+
+  // PWA：注册 service worker，让浏览器可以「安装到桌面」
+  registerSw();
 
   // 首次运行 / 环境不完整时给向导
   const e = S.env ?? {};

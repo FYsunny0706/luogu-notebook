@@ -1,0 +1,16 @@
+{
+  "name": "洛谷刷题本",
+  "short_name": "刷题本",
+  "description": "本地运行的洛谷刷题记录工具：文件夹树、题目、C++ 本地评测、一键导出 PDF。数据全部在本机。",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0d1117",
+  "theme_color": "#0d1117",
+  "lang": "zh-CN",
+  "icons": [
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}
