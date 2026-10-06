@@ -1,9 +1,13 @@
 // 生成展示素材：界面截图 + 样例 PDF（需要服务已在 8765 运行）
 import fs from "node:fs";
 import { spawn } from "node:child_process";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 const EDGE = "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe";
-const ROOT = "C:\\Users\\hzqcw\\Documents\\deepseek-harness\\default-workspace\\luogu-notebook";
+
 const PORT = 9380;
 const OUT = ROOT + "\\docs";
 const PROFILE = process.env.TEMP + "\\edge-shot3";

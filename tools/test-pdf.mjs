@@ -1,9 +1,11 @@
 // PDF 导出测试：验证不走打印对话框、直接落盘，以及左右分栏/配色是否生效
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const EXPORT_DIR = path.join(path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."), "exports");
 
 const B = "http://127.0.0.1:8765";
-const EXPORT_DIR = "C:\\Users\\hzqcw\\Documents\\deepseek-harness\\default-workspace\\luogu-notebook\\exports";
 
 async function api(pathname, body) {
   const r = await fetch(B + pathname, body ? {

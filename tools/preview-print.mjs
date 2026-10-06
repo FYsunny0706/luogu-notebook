@@ -3,9 +3,13 @@ import fs from "node:fs";
 import { spawn } from "node:child_process";
 import { buildPrintHtml } from "../lib/pdf.mjs";
 import { load } from "../lib/store.mjs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 const EDGE = "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe";
-const ROOT = "C:\\Users\\hzqcw\\Documents\\deepseek-harness\\default-workspace\\luogu-notebook";
+
 const OUT = ROOT + "\\docs";
 
 const doc = load();

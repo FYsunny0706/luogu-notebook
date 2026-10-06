@@ -3,10 +3,13 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { checkBleed } from "./check-pdf-bg.mjs";
+import { fileURLToPath } from "node:url";
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 const EDGE = "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe";
 const PORT = 9390;
-const ROOT = "C:\\Users\\hzqcw\\Documents\\deepseek-harness\\default-workspace\\luogu-notebook";
+
 const OUT = ROOT + "\\build\\uicheck";
 const PROFILE = process.env.TEMP + "\\edge-uipdf";
 

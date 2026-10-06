@@ -2,8 +2,10 @@
 import fs from "node:fs";
 import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 
-const ROOT = "C:\\Users\\hzqcw\\Documents\\deepseek-harness\\default-workspace\\luogu-notebook";
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
 const EDGE = "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe";
 const PORT = 9410;
 const PROFILE = process.env.TEMP + "\\edge-i18n";

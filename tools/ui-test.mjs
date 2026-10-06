@@ -3,11 +3,15 @@
 //       格式化 / 多档案 / 分享卡片 / PDF / 首次运行向导
 import fs from "node:fs";
 import { spawn } from "node:child_process";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 const EDGE = "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe";
 const PORT = 9370;
 const URL_APP = "http://127.0.0.1:8765/";
-const ROOT = "C:\\Users\\hzqcw\\Documents\\deepseek-harness\\default-workspace\\luogu-notebook";
+
 const OUT = ROOT + "\\build\\uicheck";
 const PROFILE = process.env.TEMP + "\\edge-ui3";
 
@@ -279,7 +283,6 @@ const summary = await evaluate("document.getElementById('testsSummary').textCont
 ok("全部测试给出通过数", /通过\s*1\s*\/\s*2/.test(summary), summary);
 ok("失败的点标了 WA", await evaluate("[...document.querySelectorAll('.tp-verdict')].some(e=>e.textContent==='WA')"),
   await evaluate("[...document.querySelectorAll('.tp-verdict')].map(e=>e.textContent).join(',')"));
-
 
 console.log("\n===== 9. 格式化（未安装时应友好提示）=====");
 await evaluate("document.getElementById('formatBtn').click()");
