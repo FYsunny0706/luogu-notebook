@@ -5,15 +5,18 @@ import path from "node:path";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
-import { fetchProblem, searchProblems, fetchUserPractice } from "./lib/luogu.mjs";
+import { fetchProblem, searchProblems, fetchUserPractice, fetchTraining, IMAGES_DIR } from "./lib/luogu.mjs";
 import { judge, loadConfig, saveConfig, killAll, warmup } from "./lib/judge.mjs";
 import {
-  load, save, flush, toMarkdown, importMarkdown, backup, flattenProblems,
+  load, save, flush, toMarkdown, toMarkdownScoped, importMarkdown, backup, flattenProblems,
   listProfiles, switchProfile, createProfile, renameProfile, deleteProfile,
-  activePaths, exportProblemCard, importProblemCard,
+  activePaths, exportProblemCard, importProblemCard, findNode,
+  writeLock, clearLock, anotherInstance, takeLoadNotice, takeConflict,
+  listBackups, restoreBackup, scanForOldData, adoptData, resetCache, countProblems,
+  listSnapshots, saveSnapshot, readSnapshot, deleteSnapshot,
 } from "./lib/store.mjs";
 import { formatCode, findClangFormat, downloadClangFormat, STYLE_PRESETS } from "./lib/format.mjs";
-import { buildPrintHtml, putPrintPage, getPrintPage, renderPdf, detectBrowser, exportDir, THEMES, EXPORT_DIR } from "./lib/pdf.mjs";
+import { buildPrintHtml, buildCardHtml, putPrintPage, getPrintPage, renderPdf, renderPng, detectBrowser, exportDir, THEMES, EXPORT_DIR } from "./lib/pdf.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)));
 const PUBLIC_DIR = path.join(root, "public");
@@ -30,7 +33,9 @@ const MIME = {
   ".mjs": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8",
   ".json": "application/json; charset=utf-8", ".woff2": "font/woff2", ".woff": "font/woff",
   ".ttf": "font/ttf", ".svg": "image/svg+xml", ".png": "image/png", ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp", ".bmp": "image/bmp",
   ".ico": "image/x-icon", ".md": "text/markdown; charset=utf-8", ".pdf": "application/pdf",
+  ".webmanifest": "application/manifest+json; charset=utf-8",
 };
 
 function sendJson(res, code, obj) {
@@ -69,14 +74,32 @@ function serveStatic(req, res, urlPath) {
   if (!fs.existsSync(target) || fs.statSync(target).isDirectory()) return false;
   const ext = path.extname(target).toLowerCase();
   const stat = fs.statSync(target);
-  const isCode = [".html", ".js", ".mjs", ".css"].includes(ext);
+  // 本地应用：除了体积大、基本不变的 vendor 依赖，其余一律 no-store。
+  // 否则改完代码/升级完版本，刷新页面可能还是浏览器缓存里的旧 js/css（sw.js 尤其不能缓存）。
+  const isVendor = rel.startsWith("/vendor/");
   res.writeHead(200, {
     "content-type": MIME[ext] ?? "application/octet-stream",
     "content-length": stat.size,
-    "cache-control": isCode ? "no-store" : "public, max-age=86400",
+    "cache-control": isVendor ? "public, max-age=604800" : "no-store",
   });
   fs.createReadStream(target).pipe(res);
   return true;
+}
+
+/** 题面图片：从 data/images/<pid>/<file> 提供（抓题时下载到本地，离线也能看） */
+function serveProblemImage(req, res, urlPath) {
+  const rel = decodeURIComponent(urlPath.slice("/api/image/".length)).replace(/\\/g, "/");
+  if (rel.includes("..")) { res.writeHead(403); res.end("forbidden"); return; }
+  const target = path.resolve(IMAGES_DIR, rel);
+  if (!target.startsWith(IMAGES_DIR)) { res.writeHead(403); res.end("forbidden"); return; }
+  if (!fs.existsSync(target) || fs.statSync(target).isDirectory()) { res.writeHead(404); res.end("not found"); return; }
+  const stat = fs.statSync(target);
+  res.writeHead(200, {
+    "content-type": MIME[path.extname(target).toLowerCase()] ?? "application/octet-stream",
+    "content-length": stat.size,
+    "cache-control": "public, max-age=604800",
+  });
+  fs.createReadStream(target).pipe(res);
 }
 
 /** 首次运行向导需要的环境体检 */
@@ -109,6 +132,7 @@ const routes = {
 
   "GET /api/state": async () => {
     const paths = activePaths();
+    const other = anotherInstance();
     return {
       ok: true,
       doc: load(),
@@ -117,6 +141,12 @@ const routes = {
       styles: STYLE_PRESETS,
       env: environmentCheck(),
       paths: { json: paths.json, markdown: paths.markdown, exports: EXPORT_DIR },
+      // 数据安全：一次性提示（损坏/恢复/迁移）+ 多实例情况
+      safety: {
+        notice: takeLoadNotice(),
+        conflict: takeConflict(),
+        anotherInstance: other ? { pid: other.pid, port: other.port, startedAt: other.startedAt } : null,
+      },
     };
   },
 
@@ -136,6 +166,9 @@ const routes = {
   },
   "POST /api/problem/search": async (body) => ({
     ok: true, list: await searchProblems(body.keyword ?? "", body.page ?? 1),
+  }),
+  "POST /api/training/fetch": async (body) => ({
+    ok: true, training: await fetchTraining(body.id ?? body.url ?? ""),
   }),
   "POST /api/problem/export": async (body) => {
     const p = flattenProblems(load().tree ?? []).find((x) => x.id === body.id || x.pid === body.pid);
@@ -168,10 +201,26 @@ const routes = {
     };
   },
 
+  /* ---------- 代码版本历史 ---------- */
+  "POST /api/snapshot/list": async (body) => ({ ok: true, list: listSnapshots(body.pid ?? "") }),
+  "POST /api/snapshot/save": async (body) => ({
+    ok: true,
+    snapshot: saveSnapshot(body.pid ?? "", body.code ?? "", { label: body.label ?? "", result: body.result ?? "" }),
+  }),
+  "POST /api/snapshot/get": async (body) => ({ ok: true, code: readSnapshot(body.pid ?? "", body.id ?? "") }),
+  "POST /api/snapshot/delete": async (body) => ({ ok: true, list: deleteSnapshot(body.pid ?? "", body.id ?? "") }),
+
   /* ---------- 存档 ---------- */
   "POST /api/save": async (body) => {
     if (!body.doc) throw new Error("缺少 doc");
-    save(body.doc);
+    const saved = save(body.doc, { force: Boolean(body.force) });
+    const conflict = takeConflict();
+    if (conflict) {
+      return {
+        ok: true, conflict: true, updatedAt: saved.updatedAt,
+        message: "检测到另一个实例改过数据，本次没有覆盖；你的版本已另存到 data/backups/",
+      };
+    }
     return { ok: true, updatedAt: new Date().toISOString() };
   },
   "GET /api/markdown": async () => ({ ok: true, markdown: toMarkdown(load()) }),
@@ -181,6 +230,16 @@ const routes = {
     return { ok: true, doc, count: flattenProblems(doc.tree ?? []).length };
   },
   "POST /api/backup": async () => ({ ok: true, file: backup() }),
+  "POST /api/backup/list": async () => ({ ok: true, list: listBackups() }),
+  "POST /api/backup/restore": async (body) => {
+    const r = restoreBackup(body.name);
+    return { ok: true, ...r, doc: load() };
+  },
+  "POST /api/adopt/scan": async () => ({ ok: true, list: scanForOldData() }),
+  "POST /api/adopt/import": async (body) => {
+    const r = adoptData(body.dir);
+    return { ok: true, ...r, doc: load() };
+  },
 
   /* ---------- 评测 ---------- */
   "POST /api/run": async (body) => ({
@@ -246,6 +305,7 @@ const routes = {
       includeCode: body.includeCode !== false,
       includeNote: body.includeNote !== false,
       lang: ["zh-CN", "zh-TW", "en"].includes(body.lang) ? body.lang : (loadConfig().uiLang ?? "zh-CN"),
+      toc: Boolean(body.toc),
     });
     const token = putPrintPage(html);
     const url = `http://127.0.0.1:${listeningPort}/print/${token}`;
@@ -257,11 +317,62 @@ const routes = {
     return { ok: true, file: fileName, size: r.size, downloadUrl: `/api/export/download/${encodeURIComponent(fileName)}`, dir: EXPORT_DIR };
   },
 
+  /* ---------- 导出：Markdown（可多题合并）/ PNG 分享卡片 ---------- */
+  "POST /api/export/markdown": async (body) => {
+    const doc = load();
+    const scope = body.scope === "current" ? "current" : "all";
+    const targetId = body.targetId ?? null;
+    const md = toMarkdownScoped(doc, { scope, targetId, toc: body.toc !== false });
+    let base = String(doc.title || "刷题本");
+    if (scope === "current" && targetId) {
+      const hit = findNode(doc.tree ?? [], targetId)?.node;
+      if (hit?.kind === "problem") base = `${hit.pid} ${hit.title ?? ""}`.trim();
+      else if (hit?.kind === "folder") base = hit.name;
+    }
+    const stamp = new Date().toISOString().replace(/[:T]/g, "-").slice(0, 16);
+    const safe = base.replace(/[\\/:*?"<>|]/g, "_").slice(0, 40) || "刷题本";
+    const fileName = `${safe}-${stamp}.md`;
+    const outPath = path.join(exportDir(), fileName);
+    fs.writeFileSync(outPath, md, "utf8");
+    return {
+      ok: true, file: fileName, size: fs.statSync(outPath).size,
+      downloadUrl: `/api/export/download/${encodeURIComponent(fileName)}`,
+      chars: md.length, count: flattenProblems(
+        scope === "current" && targetId ? [findNode(doc.tree ?? [], targetId)?.node].filter(Boolean) : (doc.tree ?? [])
+      ).length,
+    };
+  },
+
+  "POST /api/export/card": async (body) => {
+    const doc = load();
+    const hit = body.targetId ? findNode(doc.tree ?? [], body.targetId)?.node : flattenProblems(doc.tree ?? [])[0];
+    if (hit?.kind !== "problem") throw new Error("请先选中一道题，再生成分享卡片");
+    const theme = THEMES[body.theme] ? body.theme : "darkcode";
+    const html = await buildCardHtml({
+      problem: hit, theme,
+      lang: ["zh-CN", "zh-TW", "en"].includes(body.lang) ? body.lang : (loadConfig().uiLang ?? "zh-CN"),
+    });
+    const token = putPrintPage(html);
+    const url = `http://127.0.0.1:${listeningPort}/print/${token}`;
+    const stamp = new Date().toISOString().replace(/[:T]/g, "-").slice(0, 16);
+    const safe = `${hit.pid} ${hit.title ?? ""}`.replace(/[\\/:*?"<>|]/g, "_").slice(0, 40) || hit.pid;
+    const fileName = `${safe}-${stamp}.png`;
+    const outPath = path.join(exportDir(), fileName);
+    const r = await renderPng({ url, outPath });
+    return { ok: true, file: fileName, size: r.size, downloadUrl: `/api/export/download/${encodeURIComponent(fileName)}`, dir: EXPORT_DIR };
+  },
+
   "GET /api/export/list": async () => {
     const dir = exportDir();
     const files = fs.readdirSync(dir)
-      .filter((f) => f.toLowerCase().endsWith(".pdf"))
-      .map((f) => { const st = fs.statSync(path.join(dir, f)); return { name: f, size: st.size, at: st.mtimeMs }; })
+      .filter((f) => /\.(pdf|md|png)$/i.test(f))
+      .map((f) => {
+        const st = fs.statSync(path.join(dir, f));
+        return {
+          name: f, size: st.size, at: st.mtimeMs, ext: path.extname(f).toLowerCase().slice(1),
+          downloadUrl: `/api/export/download/${encodeURIComponent(f)}`,
+        };
+      })
       .sort((a, b) => b.at - a.at).slice(0, 20);
     return { ok: true, files, dir };
   },
@@ -274,7 +385,8 @@ function serveDownload(res, name) {
   if (!target.startsWith(dir) || !fs.existsSync(target)) { sendJson(res, 404, { ok: false, error: "文件不存在" }); return; }
   const stat = fs.statSync(target);
   res.writeHead(200, {
-    "content-type": "application/pdf", "content-length": stat.size,
+    "content-type": MIME[path.extname(target).toLowerCase()] ?? "application/octet-stream",
+    "content-length": stat.size,
     "content-disposition": `attachment; filename="${encodeURIComponent(safe)}"`, "cache-control": "no-store",
   });
   fs.createReadStream(target).pipe(res);
@@ -316,6 +428,7 @@ async function handle(req, res) {
     return;
   }
 
+  if (req.method === "GET" && url.pathname.startsWith("/api/image/")) { serveProblemImage(req, res, url.pathname); return; }
   if (req.method === "GET" && serveStatic(req, res, url.pathname)) return;
   sendJson(res, 404, { ok: false, error: "not found" });
 }
@@ -328,6 +441,7 @@ function listen(port, attempt = 0) {
   });
   server.listen(port, "127.0.0.1", () => {
     listeningPort = port;
+    writeLock(port);
     const env = environmentCheck();
     const url = `http://127.0.0.1:${port}/`;
     console.log("");
@@ -340,6 +454,14 @@ function listen(port, attempt = 0) {
     console.log(`  代码格式化: ${env.clangFormat || "未安装（可选）"}`);
     console.log(`  数据目录:   ${path.join(root, "data")}`);
     console.log(`  PDF 输出:   ${EXPORT_DIR}`);
+    const other = anotherInstance();
+    if (other) {
+      console.log("");
+      console.log("  ⚠️  检测到另一个刷题本实例正在运行（可能是没关掉的旧窗口）：");
+      console.log(`      进程 ${other.pid}，端口 ${other.port}，启动于 ${other.startedAt}`);
+      console.log("      两个实例同时改同一份数据会互相覆盖。建议关掉多余的那个。");
+      console.log("      本实例在检测到数据被对方改过时会拒绝覆盖，并把你的版本另存到 data/backups/。");
+    }
     console.log("  关闭此窗口即停止服务。");
     console.log("");
     warmup();
@@ -359,7 +481,12 @@ for (const d of ["data", "build", "exports", path.join("tools", "bin")]) {
 const FIRST_RUN = !fs.existsSync(path.join(root, "config.json"));
 if (FIRST_RUN) saveConfig({});
 
-const shutdown = () => { try { flush(); } catch {} try { killAll(); } catch {} process.exit(0); };
+const shutdown = () => {
+  try { flush(); } catch {}
+  try { killAll(); } catch {}
+  try { clearLock(); } catch {}
+  process.exit(0);
+};
 process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);
 
