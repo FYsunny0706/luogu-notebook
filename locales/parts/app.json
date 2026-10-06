@@ -208,7 +208,7 @@
   "settings.clangPlaceholder": "留空则自动探测",
   "settings.styleLabel": "格式化风格",
   "settings.uidLabel": "洛谷 UID（同步用）",
-  "settings.uidPlaceholder": "例如 2213920",
+  "settings.uidPlaceholder": "例如 123456",
   "settings.repoLabel": "更新源（GitHub 仓库 owner/name，填了才能检查更新）",
   "settings.repoPlaceholder": "例如 yourname/luogu-notebook",
   "settings.profileLabel": "刷题本档案（互不干扰的多套数据）",

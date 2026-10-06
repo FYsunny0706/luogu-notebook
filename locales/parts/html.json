@@ -71,7 +71,7 @@
   "sync.tip": "同步洛谷账号已做题目",
   "sync.title": "同步洛谷已做题目",
   "sync.uid": "洛谷用户编号 (UID)",
-  "sync.uidPlaceholder": "例如 2213920",
+  "sync.uidPlaceholder": "例如 123456",
   "sync.fetch": "拉取数据",
   "sync.note": "公开接口，不需要密码",
   "sync.resultHint": "填好 UID 后点「拉取数据」。",
