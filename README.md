@@ -6,7 +6,7 @@
 - 断网也能看题、写代码（题面是抓下来存在本地的）
 - 不想用了，删掉文件夹就干净了，不会在系统里留东西
 
-> 当前版本 **v1.2.1**
+> 当前版本 **v1.2.2**
 
 ---
 
@@ -137,7 +137,7 @@
 node tools/package.mjs
 ```
 
-会在 `dist/` 里生成 `luogu-notebook-v1.2.1.zip`。对方解压后双击 `start.bat` 就能用，第一次打开有向导带着配环境。
+会在 `dist/` 里生成 `luogu-notebook-v1.2.2.zip`。对方解压后双击 `start.bat` 就能用，第一次打开有向导带着配环境。
 
 ## 需要装什么
 
@@ -185,6 +185,7 @@ node tools/test-print-css.mjs    # 打印排版几何
 node tools/test-pwa.mjs          # 桌面应用安装能力
 node tools/test-exports.mjs      # 导出：Markdown / PNG / 历史
 node tools/test-history.mjs      # 代码版本历史
+node tools/test-card.mjs         # PNG 卡片：标签不重复、题面与图片都在、代码块有底色
 node tools/test-toc.mjs          # PDF 目录页与书签
 node tools/test-index-views.mjs  # 按算法 / 按比赛 两种索引视图
 node tools/test-training.mjs     # 题单导入（需要联网）
